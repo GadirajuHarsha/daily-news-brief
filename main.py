@@ -26,7 +26,7 @@ def get_best_stories(feed_url, limit=5):
     for entry in feed.entries:
         score = 0
         # nuanced scoring (keyword matching)
-        if any(word.lower() in entry.title.lower() for word in PRIORITIES):
+        if any(word.lower() in entry.title.lower() for word in PRIORITY_KEYWORDS):
             score += 20
         # bias towards more recent or descriptive items
         scored_entries.append((score, entry))
@@ -35,6 +35,9 @@ def get_best_stories(feed_url, limit=5):
     return [e[1] for e in scored_entries[:limit]]
 
 def generate_script(category, raw_data):
+    if not raw_data.strip():
+        return f"There are no major updates in {category} for you this morning."
+    
     prompt = f"Summarize these {category} stories into a spoken script. \n\n {raw_data}"
     
     response = client.chat.completions.create(
@@ -54,8 +57,13 @@ async def main():
         print(f"Generating {category} briefing...")
         stories = get_best_stories(url)
         
-        # combine headlines and summaries for the llm
-        raw_text = "\n".join([f"{s.title}: {s.summary}" for s in stories])
+        # summary extraction (tries 'summary' then 'description')
+        extracted_stories = []
+        for s in stories:
+            content = getattr(s, 'summary', getattr(s, 'description', ''))
+            extracted_stories.append(f"TITLE: {s.title}\nCONTENT: {content}")
+        
+        raw_text = "\n\n".join(extracted_stories)
         script = generate_script(category, raw_text)
         
         # audio generation (free via edge-tts)
@@ -70,6 +78,10 @@ async def main():
         with open(filename, "rb") as f:
             webhook.add_file(file=f.read(), filename=filename)
         webhook.execute()
+        
+        # clean up file after sending to keep the github runner clean
+        if os.path.exists(filename):
+            os.remove(filename)
 
 if __name__ == "__main__":
     asyncio.run(main())
