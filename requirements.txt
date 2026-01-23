@@ -1,0 +1,5 @@
+feedparser
+edge-tts
+openai
+discord-webhook
+python-dotenv
