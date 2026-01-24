@@ -5,20 +5,20 @@ from discord_webhook import DiscordWebhook
 # feeds are organized by category with base priorities
 FEEDS = {
     "politics": [
-        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "priority": 3},
+        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "priority": 4},
         {"url": "https://prospect.org/api/rss/content.rss", "priority": 3},
         {"url": "https://jacobin.com/feed", "priority": 2},
         {"url": "https://thehill.com/homenews/feed/", "priority": 3},
         {"url": "https://www.theguardian.com/us-news/rss", "priority": 2},
-        {"url": "https://apnews.com/hub/politics.rss", "priority": 3}
+        {"url": "https://apnews.com/hub/politics.rss", "priority": 4}
     ],
     "sports": [
         {"url": "https://www.espn.com/espn/rss/nba/news", "priority": 3},
-        {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "priority": 3},
-        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "priority": 2},
-        {"url": "https://texaslonghorns.com/rss?path=general", "priority": 3},
+        {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "priority": 4},
+        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "priority": 3},
+        {"url": "https://texaslonghorns.com/rss?path=general", "priority": 2},
         {"url": "https://texaslonghorns.com/rss?path=football", "priority": 3},
-        {"url": "https://thedailytexan.com/category/sports/feed/", "priority": 2}
+        {"url": "https://thedailytexan.com/category/sports/feed/", "priority": 1}
     ],
     "tech": [
         {"url": "https://www.engadget.com/rss.xml", "priority": 3},
@@ -28,15 +28,15 @@ FEEDS = {
         {"url": "https://rss.slashdot.org/Slashdot/slashdotMainatom", "priority": 2}
     ],
     "media": [
-        {"url": "https://www.serebii.net/index.rss", "priority": 3},
+        {"url": "https://www.serebii.net/index.rss", "priority": 5},
         {"url": "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us", "priority": 3},
         {"url": "https://www.nintendolife.com/feeds/latest", "priority": 3},
         {"url": "https://mynintendonews.com/feed/", "priority": 2},
         {"url": "https://kotaku.com/rss", "priority": 3},
         {"url": "https://www.eurogamer.net/feed", "priority": 2},
-        {"url": "https://pitchfork.com/rss/news/", "priority": 3},
+        {"url": "https://pitchfork.com/rss/news/", "priority": 4},
         {"url": "https://xxlmag.com/feed/", "priority": 2},
-        {"url": "https://hypebeast.com/music/feed", "priority": 2},
+        {"url": "https://hypebeast.com/music/feed", "priority": 3},
         {"url": "https://allhiphop.com/feed/", "priority": 2}
     ]
 }
@@ -130,7 +130,7 @@ async def main():
 
         duration = get_audio_duration(final_file)
         if duration >= 900 or attempt == 3:
-            if duration < 900: notice = "\n\n⚠️ *Threshold Notice: Under 15m target.*"
+            if duration < 900: notice = "\n\n*Threshold Notice: Under 15m target.*"
             break
         print(f"Attempt {attempt} too short ({duration/60:.2f}m). Retrying...")
 
