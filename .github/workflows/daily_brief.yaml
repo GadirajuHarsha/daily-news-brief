@@ -36,3 +36,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Setup FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Run Script
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: python main.py
