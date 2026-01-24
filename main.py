@@ -5,7 +5,7 @@ from discord_webhook import DiscordWebhook
 # feed weighting
 FEEDS = {
     "politics": [
-        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 20},
+        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 18},
         {"url": "https://apnews.com/hub/politics.rss", "weight": 20},
         {"url": "https://www.reutersagency.com/feed/?best-topics=political-news&post_type=best", "weight": 18},
         {"url": "https://thehill.com/homenews/feed/", "weight": 15},
@@ -15,7 +15,7 @@ FEEDS = {
     ],
     "sports": [
         {"url": "https://www.espn.com/espn/rss/nba/news", "weight": 20},
-        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "weight": 20},
+        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "weight": 18},
         {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 17},
         {"url": "https://www.cbssports.com/xml/rss/itnba.xml", "weight": 17},
         {"url": "https://api.foxsports.com/v1/rss?partnerKey=zBa1u7En6Sjz9N8H&tag=nba", "weight": 17},
@@ -44,9 +44,9 @@ FEEDS = {
 # keyword multipliers (1.0 is neutral, 2.0 is double priority)
 MULTIPLIERS = {
     "pokemon": 2.0, "serebii": 1.9, "shonen": 1.6, "luka": 2.0, "mavs": 1.8, 
-    "longhorns": 1.7, "iphone": 1.5, "rap": 1.5, "r&b": 1.6, "lakers": 1.6, 
-    "nba": 1.6, "zelda": 1.9, "mario": 1.8, "clairo": 1.8, "caesar": 1.8, 
-    "drake": 1.7, "savage": 1.7, "jojo's": 1.8, "lego": 1.4
+    "longhorns": 1.7, "iphone": 1.5, "rap": 1.5, "r&b": 1.6, "lakers": 1.5, 
+    "nba": 1.6, "zelda": 1.9, "mario": 1.6, "clairo": 1.8, "caesar": 1.8, 
+    "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8, "lego": 1.2
 }
 
 # bottom quotas
@@ -101,9 +101,8 @@ async def main():
                 t_key = get_topic_key(title)
                 if t_key in seen_topics: continue
                 
-                # score calculation using the updated multiplier logic
-                # score is now calculated using compounding multipliers to let elite stories skyrocket
-                score = float(cfg['weight'] * 10)
+                # score calculation using compounding multipliers to let top stories skyrocket
+                score = float(cfg['weight'] * 20)
                 
                 # apply top-of-feed multiplier
                 if i < 3: 
@@ -129,7 +128,7 @@ async def main():
             with open(SEEN_FILE, "a") as f:
                 for s in stories: f.write(f"{s['hash']}\n")
 
-    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nThat concludes today's briefing. Goodbye."
+    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nThat concludes today's briefing. This has been Orator, thank you for listening."
     
     final_file = f"{file_date}_Orator.mp3"
     voice_file = "voice.mp3"
@@ -142,7 +141,7 @@ async def main():
         subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", final_file], check=True)
     else: os.rename(voice_file, final_file)
 
-    webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
+    webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
     with open("sources.txt", "w") as f: f.write("\n".join(all_links))
     with open("sources.txt", "rb") as f: webhook.add_file(file=f.read(), filename="sources.txt")
