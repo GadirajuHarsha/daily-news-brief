@@ -15,10 +15,10 @@ FEEDS = {
     "sports": [
         {"url": "https://www.espn.com/espn/rss/nba/news", "priority": 3},
         {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "priority": 4},
-        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "priority": 3},
-        {"url": "https://texaslonghorns.com/rss?path=general", "priority": 2},
+        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "priority": 2},
+        {"url": "https://texaslonghorns.com/rss?path=general", "priority": 3},
         {"url": "https://texaslonghorns.com/rss?path=football", "priority": 3},
-        {"url": "https://thedailytexan.com/category/sports/feed/", "priority": 1}
+        {"url": "https://thedailytexan.com/category/sports/feed/", "priority": 2}
     ],
     "tech": [
         {"url": "https://www.engadget.com/rss.xml", "priority": 3},
@@ -32,16 +32,16 @@ FEEDS = {
         {"url": "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us", "priority": 3},
         {"url": "https://www.nintendolife.com/feeds/latest", "priority": 3},
         {"url": "https://mynintendonews.com/feed/", "priority": 2},
-        {"url": "https://kotaku.com/rss", "priority": 3},
+        {"url": "https://kotaku.com/rss", "priority": 2},
         {"url": "https://www.eurogamer.net/feed", "priority": 2},
-        {"url": "https://pitchfork.com/rss/news/", "priority": 4},
+        {"url": "https://pitchfork.com/rss/news/", "priority": 3},
         {"url": "https://xxlmag.com/feed/", "priority": 2},
         {"url": "https://hypebeast.com/music/feed", "priority": 3},
         {"url": "https://allhiphop.com/feed/", "priority": 2}
     ]
 }
 
-SEGMENT_TIMES = {"politics": 6, "sports": 7, "media": 4, "tech": 3}
+SEGMENT_TIMES = {"politics": 8, "sports": 8, "media": 2, "tech": 2}
 SEEN_FILE = "seen_stories.txt"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -103,7 +103,7 @@ async def main():
     file_date = cst_now.strftime("%Y-%m-%d")
     if not os.path.exists(SEEN_FILE): open(SEEN_FILE, 'w').close()
     with open(SEEN_FILE, "r") as f: seen_hashes = set(line.strip() for line in f)
-    final_file = f"{file_date}_godiraju_Orator.mp3"
+    final_file = f"{file_date}_Orator.mp3"
     notice = ""
 
     for attempt in range(1, 4):
@@ -116,7 +116,7 @@ async def main():
             all_hashes.extend(hashes)
             all_links.extend(links)
         
-        full_text = f"Hello, I'm Orator, and this is your comprehensive briefing for {date_str}.\n\n" + "\n\n".join(full_segment_text) + "\n\nThat concludes today's Orator briefing. Goodbye."
+        full_text = f"Hello, I'm Orator, and this is your briefing for {date_str}.\n\n" + "\n\n".join(full_segment_text) + "\n\nThat concludes today's Orator briefing. Goodbye."
         voice_file = "voice.mp3"
         await edge_tts.Communicate(full_text, "en-US-AndrewNeural", rate="+22%").save(voice_file)
         
@@ -125,7 +125,7 @@ async def main():
         if music_files: bg_music = random.choice(music_files)
         
         if os.path.exists(bg_music):
-            subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.04[bg];[0:a][bg]amix=inputs=2:duration=first", final_file])
+            subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", final_file])
         else: os.rename(voice_file, final_file)
 
         duration = get_audio_duration(final_file)
@@ -134,7 +134,7 @@ async def main():
             break
         print(f"Attempt {attempt} too short ({duration/60:.2f}m). Retrying...")
 
-    webhook_content = f"**{file_date} - - ORATOR DAILY NEWS FOR <@{os.getenv('DISCORD_USER_ID')}>**{notice}"
+    webhook_content = f"**{file_date} - ORATOR DAILY NEWS FOR <@{os.getenv('DISCORD_USER_ID')}>**{notice}"
     webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=webhook_content)
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
     with open("sources.txt", "w") as f: f.write("\n".join(all_links))
