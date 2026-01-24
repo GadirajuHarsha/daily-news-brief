@@ -30,3 +30,10 @@ jobs:
           git add seen_stories.txt
           git commit -m "Update seen stories [skip ci]" || echo "No changes to commit"
           git push || echo "Push failed or nothing to push"
+      - name: Run Script
+        env:
+          PYTHONUNBUFFERED: "1"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: python main.py

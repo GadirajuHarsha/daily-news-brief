@@ -9,7 +9,6 @@ from openai import OpenAI
 from discord_webhook import DiscordWebhook
 
 # --- CONFIGURATION ---
-# Fixed: Ensured all keys used in tasks exist here
 FEEDS = {
     "politics": "https://www.pbs.org/newshour/feeds/rss/politics", 
     "tech": "https://www.theverge.com/tech/rss/index.xml",
@@ -23,10 +22,10 @@ FEEDS = {
 }
 
 # Hierarchical Weights
-POKEMON_KW = ["Pokemon", "Niantic", "Game Freak", "Pikachu"] # Score: 200
-MEDIA_KW = ["Zelda", "Mario", "Anime", "Manga", "Crunchyroll", "Nintendo"] # Score: 100
-SPORTS_KW = ["Mavericks", "Mavs", "Doncic", "Kyrie", "Luka", "NBA"] # Score: 60
-LEGO_KW = ["Lego"] # Score: 5
+POKEMON_KW = ["Pokemon", "Niantic", "Game Freak", "Pikachu"]
+MEDIA_KW = ["Zelda", "Mario", "Anime", "Manga", "Crunchyroll", "Nintendo"]
+SPORTS_KW = ["Mavericks", "Mavs", "Doncic", "Kyrie", "Luka", "NBA"]
+LEGO_KW = ["Lego"]
 
 SEEN_FILE = "seen_stories.txt"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -34,16 +33,20 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # --- LOGIC ---
 
 def fetch_feed_safely(url):
+    print(f"Attempting to fetch: {url}", flush=True)
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/rss+xml, application/xml;q=0.9, */*;q=0.8'
     }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=20) as response:
-            return feedparser.parse(response.read())
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = response.read()
+            parsed = feedparser.parse(data)
+            print(f"  Success! Found {len(parsed.entries)} entries.", flush=True)
+            return parsed
     except Exception as e:
-        print(f"Warning: Could not fetch {url}: {e}")
+        print(f"  ERROR fetching {url}: {e}", flush=True)
         return None
 
 def get_best_stories(feed_urls, seen_hashes):
@@ -78,7 +81,7 @@ def get_best_stories(feed_urls, seen_hashes):
     return scored_entries[:12]
 
 async def main():
-    # Sync to Austin Time (CST)
+    print("Starting News Briefing Script...", flush=True)
     cst_now = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
     date_str = cst_now.strftime("%Y-%m-%d")
     spoken_date = cst_now.strftime("%A, %B %d, %Y")
@@ -86,9 +89,8 @@ async def main():
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
     user_id = os.getenv("DISCORD_USER_ID")
     
-    # Initialize seen file if it doesn't exist
     if not os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, 'w') as f: pass
+        open(SEEN_FILE, 'w').close()
         
     with open(SEEN_FILE, "r") as f:
         seen_hashes = set(line.strip() for line in f)
@@ -101,11 +103,14 @@ async def main():
     ]
 
     for t in tasks:
+        print(f"--- Processing Category: {t['name']} ---", flush=True)
         entries = get_best_stories(t['urls'], seen_hashes)
+        
         if not entries: 
-            print(f"No new stories for {t['name']}. Skipping.")
+            print(f"  Result: No qualifying stories found for {t['name']}. Likely filtered by 48h limit or already seen.", flush=True)
             continue
 
+        print(f"  Summarizing {len(entries)} stories with OpenAI...", flush=True)
         data_payload = ""
         for score, e, h in entries:
             summary = getattr(e, 'summary', getattr(e, 'description', ''))
@@ -120,15 +125,18 @@ async def main():
         )
         script = resp.choices[0].message.content
         
+        print(f"  Generating Audio for {t['name']}...", flush=True)
         filename = f"{date_str}_{t['name']}.mp3"
         
         try:
             communicate = edge_tts.Communicate(script, t['v'], rate="+25%")
             await communicate.save(filename)
+            print(f"  Audio saved: {filename}", flush=True)
         except Exception as e:
-            print(f"TTS Error for {t['name']}: {e}")
+            print(f"  TTS Error for {t['name']}: {e}", flush=True)
             continue
         
+        print(f"  Sending {t['name']} to Discord...", flush=True)
         ping = f"<@{user_id}>" if user_id else ""
         webhook = DiscordWebhook(url=webhook_url, content=f"{ping} 🎙️ **{spoken_date}** | {t['name'].upper()}")
         with open(filename, "rb") as f:
@@ -136,6 +144,9 @@ async def main():
         
         webhook.execute()
         os.remove(filename)
+        print(f"  Finished {t['name']}.", flush=True)
+
+    print("Workflow Complete.", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
