@@ -20,24 +20,19 @@ FEEDS = {
     "media_pokemon": "https://pokemongohub.net/feed"
 }
 
-# New Hierarchical Priorities
-POKEMON_KEYWORDS = ["Pokemon", "Pikachu", "Niantic", "Game Freak", "Scarlet", "Violet"]
-MEDIA_KEYWORDS = ["Zelda", "Mario", "Anime", "Manga", "Crunchyroll", "One Piece", "Crunchyroll"]
+# Hierarchical Priorities (Updated per request)
+POKEMON_KEYWORDS = ["Pokemon", "Niantic", "Game Freak", "Scarlet", "Violet", "Pikachu"]
+MEDIA_KEYWORDS = ["Zelda", "Mario", "Anime", "Manga", "Crunchyroll", "One Piece", "Link", "Nintendo"]
 SPORTS_KEYWORDS = ["Mavericks", "Mavs", "Doncic", "Kyrie", "Luka", "NBA"]
-LEGO_KEYWORDS = ["Lego", "Minifigure"] # Deprioritized in the script logic
+LEGO_KEYWORDS = ["Lego"]
 
 SEEN_FILE = "seen_stories.txt"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# --- CORE LOGIC ---
+# --- LOGIC ---
 
 def fetch_feed_safely(url):
-    """Mimics a modern Chrome browser to bypass WAF/Bot blocks."""
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/rss+xml, application/xml;q=0.9, */*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-    }
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
@@ -53,26 +48,24 @@ def get_best_stories(feed_urls, seen_hashes, limit=15):
         if feed: all_entries.extend(feed.entries)
     
     scored_entries = []
-    now = datetime.datetime.now(datetime.timezone.utc)
+    # Force 48-hour window based on UTC-6 (Austin)
+    now_cst = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
     
     for entry in all_entries:
-        # --- STRICT 48-HOUR FILTER ---
         pub_date = getattr(entry, 'published_parsed', None)
         if pub_date:
             dt = datetime.datetime(*pub_date[:6], tzinfo=datetime.timezone.utc)
-            if (now - dt).days > 2: continue 
+            if (now_cst - dt).days > 2: continue 
 
         story_hash = hashlib.md5(entry.title.encode()).hexdigest()
         if story_hash in seen_hashes: continue
 
         score = 0
         title = entry.title.lower()
-        
-        # New Scoring Weights
-        if any(kw.lower() in title for kw in POKEMON_KEYWORDS): score += 100 # Top Tier
-        if any(kw.lower() in title for kw in MEDIA_KEYWORDS): score += 60  # High Tier
-        if any(kw.lower() in title for kw in SPORTS_KEYWORDS): score += 50 # Priority Sports
-        if any(kw.lower() in title for kw in LEGO_KEYWORDS): score += 5    # Minimal Lego
+        if any(kw.lower() in title for kw in POKEMON_KEYWORDS): score += 120 # Top Tier
+        if any(kw.lower() in title for kw in MEDIA_KEYWORDS): score += 80   # High Tier
+        if any(kw.lower() in title for kw in SPORTS_KEYWORDS): score += 50  # Mid Tier
+        if any(kw.lower() in title for kw in LEGO_KEYWORDS): score += 5     # Deprioritized
         
         scored_entries.append((score, entry, story_hash))
     
@@ -80,8 +73,8 @@ def get_best_stories(feed_urls, seen_hashes, limit=15):
     return scored_entries[:limit]
 
 async def main():
-    # --- DATE FIX (CST OFFSET) ---
-    cst_now = datetime.datetime.now() - datetime.timedelta(hours=6)
+    # AUSTIN TIME SYNC
+    cst_now = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
     date_str = cst_now.strftime("%Y-%m-%d")
     spoken_date = cst_now.strftime("%A, %B %d, %Y")
     
@@ -101,9 +94,7 @@ async def main():
 
     for t in tasks:
         entries = get_best_stories(t['urls'], seen_hashes)
-        if not entries: 
-            print(f"SKIPPING {t['name']} - No fresh data found.")
-            continue
+        if not entries: continue
 
         data_payload = ""
         for score, e, h in entries:
@@ -111,10 +102,10 @@ async def main():
             data_payload += f"STORY: {e.title}\nDETAIL: {summary}\n\n"
             with open(SEEN_FILE, "a") as f: f.write(f"{h}\n")
 
-        # Zero Temperature Hallucination Guard
+        # Zero Temp + Context Hardening
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "system", "content": f"You are a professional anchor. TODAY IS {spoken_date}. Use ONLY data provided. No outside context. No halluncinations. Speak at 1.25x speed."},
+            messages=[{"role": "system", "content": f"You are a fact-only news anchor. TODAY IS {spoken_date}. Assume full context. Use ONLY provided data. No outside info. No hallucinations."},
                       {"role": "user", "content": f"Briefing for {t['name']}:\n{data_payload}"}],
             temperature=0
         )
