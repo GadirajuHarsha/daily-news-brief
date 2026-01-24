@@ -15,7 +15,7 @@ FEEDS = {
     "gaming": "https://www.nintendolife.com/feeds/latest"
 }
 
-PRIORITY_KEYWORDS = ["NBA", "Mavericks", "Luka", "Kyrie", "Longhorns", "Nintendo", "Switch", "iPhone", "UT Austin"]
+PRIORITIES = ["Mavericks", "Mavs", "Luka", "Kyrie", "Longhorns", "UT Austin", "Nintendo", "Switch", "iPhone", "Nvidia"]
 SEEN_FILE = "seen_stories.txt"
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -41,10 +41,10 @@ def get_best_stories(category, feed_url, seen_hashes):
 
         score = 0
         title = entry.title.lower()
-        if any(word.lower() in title for word in PRIORITY_KEYWORDS):
-            score += 50
+        if any(word.lower() in title for word in PRIORITIES):
+            score += 100
         
-        if "poll:" in title: continue
+        if "poll:" in title or "discussion:" in title: continue
 
         scored_entries.append((score, entry, story_hash))
     
@@ -56,31 +56,30 @@ def generate_script(category, raw_data, length_minutes):
         return f"No new updates for {category} since your last briefing."
 
     category_rules = {
-        "sports": "Focus heavily on the Dallas Mavericks and UT Austin Longhorns. Be extremely specific. Name players, scores, and specific matchups. No generalizations like 'teams are looking at trades.' If a game is rescheduled, say exactly who was playing and when.",
-        "politics": "Assume I have full context on current events. Skip the 'introduction' to topics. Give me the latest strategic update, vote count, or policy shift. Be specific with names and dates.",
-        "tech": "Focus on consumer hardware and product launches. Ignore corporate board-room drama unless it changes a product I use.",
-        "gaming": "Focus on Nintendo and major releases. No community polls."
+        "sports": "Focus heavily on the Dallas Mavericks and UT Austin Longhorns. Be extremely specific: name players, specific scores, and venues. If a game is rescheduled, state the teams and the original date. Avoid sweeping league-wide generalizations.",
+        "politics": "Assume I have full context. Give me only the latest hard updates on votes, policy shifts, and strategic moves. Use specific names and dates.",
+        "tech": "Focus on consumer hardware, devices, and product launches. Minimize corporate board-room news.",
+        "gaming": "Focus on Nintendo and hardware news. No community polls or filler."
     }
 
     prompt = f"""
-    You are a high-level news orator for a personal {category} podcast. 
-    TARGET LENGTH: {length_minutes} minutes of speech.
+    You are a professional news orator for a personal {category} podcast. 
+    TARGET LENGTH: {length_minutes} minutes.
     
     STRICT RULES:
-    1. NO intro/outro like 'Stay tuned' or 'Welcome back'.
+    1. NO 'stay tuned', 'welcome back', or intro/outro music descriptions.
     2. DO NOT use headlines. Speak in a continuous, fast-paced narrative.
-    3. NO sweeping claims. Use names, dates, and titles for EVERYTHING.
-    4. Assume the listener is an expert. Don't explain basic terms.
-    5. Write dates as words (e.g., 'January twenty-third') for the TTS.
-    6. Specificity: {category_rules.get(category, "")}
+    3. Use specific names, dates, and numbers. No 'many people say' or 'teams are looking'.
+    4. Write dates as words (e.g., 'January twenty-third').
+    5. Detail: {category_rules.get(category, "")}
 
-    NEWS DATA:
+    DATA:
     {raw_data}
     """
     
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "system", "content": "You are a specific, professional news anchor. You hate generalizations and filler. You provide only hard facts and specific updates."},
+        messages=[{"role": "system", "content": "You are a specific, fact-focused radio anchor. You provide hard updates with zero filler."},
                   {"role": "user", "content": prompt}],
         temperature=0.2
     )
@@ -103,8 +102,7 @@ async def main():
     ]
 
     for b in briefings:
-        print(f"Processing {b['cat']}...")
-        top_stories = b['data'][:10]
+        top_stories = b['data'][:12]
         if not top_stories: continue
 
         extracted = []
@@ -116,8 +114,7 @@ async def main():
         script = generate_script(b['cat'], "\n\n".join(extracted), b['len'])
         filename = f"{date_str}_{b['cat']}.mp3"
         
-        communicate = edge_tts.Communicate(script, b['voice'], rate="+25%")
-        await communicate.save(filename)
+        await edge_tts.Communicate(script, b['voice'], rate="+25%").save(filename)
         
         webhook = DiscordWebhook(url=webhook_url, content=f"📅 **{date_str}** | {b['cat'].upper()} PODCAST")
         with open(filename, "rb") as f:
