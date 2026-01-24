@@ -7,18 +7,21 @@ import hashlib
 from openai import OpenAI
 from discord_webhook import DiscordWebhook
 
+# --- CONFIGURATION ---
 FEEDS = {
-    "politics": "https://www.theverge.com/policy/rss/index.xml",
+    "politics": "https://www.theverge.com/policy/rss/index.xml", 
     "sports": "https://www.espn.com/espn/rss/nba/news",
     "ut_sports": "https://texaslonghorns.com/rss?path=general",
-    "tech": "https://www.theverge.com/tech/rss/index.xml",
+    "tech": "https://www.theverge.com/tech/rss/index.xml", 
     "gaming": "https://www.nintendolife.com/feeds/latest"
 }
 
-PRIORITIES = ["Mavericks", "Mavs", "Luka", "Kyrie", "Longhorns", "UT Austin", "Nintendo", "Switch", "iPhone", "Nvidia"]
+PRIORITIES = ["Mavericks", "Mavs", "Luka", "Kyrie", "Longhorns", "UT Austin", "Nintendo", "Switch", "iPhone", "Nvidia", "LeBron"]
 SEEN_FILE = "seen_stories.txt"
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# --- LOGIC ---
 
 def get_seen_hashes():
     if os.path.exists(SEEN_FILE):
@@ -56,20 +59,20 @@ def generate_script(category, raw_data, length_minutes):
         return f"No new updates for {category} since your last briefing."
 
     category_rules = {
-        "sports": "Focus heavily on the Dallas Mavericks and UT Austin Longhorns. Be extremely specific: name players, specific scores, and venues. If a game is rescheduled, state the teams and the original date. Avoid sweeping league-wide generalizations.",
-        "politics": "Assume I have full context. Give me only the latest hard updates on votes, policy shifts, and strategic moves. Use specific names and dates.",
-        "tech": "Focus on consumer hardware, devices, and product launches. Minimize corporate board-room news.",
-        "gaming": "Focus on Nintendo and hardware news. No community polls or filler."
+        "sports": "Focus heavily on the Dallas Mavericks and UT Austin Longhorns. Be extremely specific with names, scores, and dates. Avoid 'league-wide' generalizations. If a game is rescheduled, say exactly who and when.",
+        "politics": "Give me the latest strategic updates and policy shifts. No introductions. Use specific names and dates.",
+        "tech": "Focus on consumer hardware and product launches. Ignore board-room drama.",
+        "gaming": "Focus on Nintendo and hardware releases. No community polls."
     }
 
     prompt = f"""
-    You are a professional news orator for a personal {category} podcast. 
-    TARGET LENGTH: {length_minutes} minutes.
+    You are a high-level news orator for a personal {category} podcast. 
+    TARGET LENGTH: {length_minutes} minutes of narrative.
     
     STRICT RULES:
-    1. NO 'stay tuned', 'welcome back', or intro/outro music descriptions.
-    2. DO NOT use headlines. Speak in a continuous, fast-paced narrative.
-    3. Use specific names, dates, and numbers. No 'many people say' or 'teams are looking'.
+    1. NO 'stay tuned', intro/outro, or structural markers. No headlines or bullet points.
+    2. Continuous, fast-paced narrative ONLY. 
+    3. Use specific names, dates, and numbers. No sweeping claims like 'teams are looking'.
     4. Write dates as words (e.g., 'January twenty-third').
     5. Detail: {category_rules.get(category, "")}
 
@@ -79,7 +82,7 @@ def generate_script(category, raw_data, length_minutes):
     
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "system", "content": "You are a specific, fact-focused radio anchor. You provide hard updates with zero filler."},
+        messages=[{"role": "system", "content": "You provide specific, fact-dense news briefings without filler or generalities."},
                   {"role": "user", "content": prompt}],
         temperature=0.2
     )
@@ -95,10 +98,10 @@ async def main():
     sports_data.sort(key=lambda x: x[0], reverse=True)
 
     briefings = [
-        {"cat": "politics", "data": get_best_stories("politics", FEEDS["politics"], seen_hashes), "len": "5", "voice": "en-US-AndrewMultilingualNeural"},
+        {"cat": "politics", "data": get_best_stories("politics", FEEDS["politics"], seen_hashes), "len": "5", "voice": "en-US-AndrewNeural"},
         {"cat": "sports", "data": sports_data, "len": "4", "voice": "en-US-AndrewNeural"},
         {"cat": "tech", "data": get_best_stories("tech", FEEDS["tech"], seen_hashes), "len": "2.5", "voice": "en-US-BrianNeural"},
-        {"cat": "gaming", "data": get_best_stories("gaming", FEEDS["gaming"], seen_hashes), "len": "2.5", "voice": "en-US-AvaMultilingualNeural"}
+        {"cat": "gaming", "data": get_best_stories("gaming", FEEDS["gaming"], seen_hashes), "len": "2.5", "voice": "en-US-BrianNeural"}
     ]
 
     for b in briefings:
@@ -116,7 +119,7 @@ async def main():
         
         await edge_tts.Communicate(script, b['voice'], rate="+25%").save(filename)
         
-        webhook = DiscordWebhook(url=webhook_url, content=f"📅 **{date_str}** | {b['cat'].upper()} PODCAST")
+        webhook = DiscordWebhook(url=webhook_url, content=f"🎙️ **{date_str} Briefing** | {b['cat'].upper()}")
         with open(filename, "rb") as f:
             webhook.add_file(file=f.read(), filename=filename)
         webhook.execute()
