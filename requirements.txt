@@ -2,5 +2,5 @@ feedparser
 openai>=1.0.0
 discord-webhook
 trafilatura
-edge_tts
+edge-tts
 python-dotenv
