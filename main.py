@@ -2,7 +2,7 @@ import os, asyncio, feedparser, datetime, hashlib, trafilatura, edge_tts, subpro
 from openai import OpenAI
 from discord_webhook import DiscordWebhook
 
-# feeds are organized by category with base priorities
+# --- CONFIGURATION ---
 FEEDS = {
     "politics": [
         {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "priority": 4},
@@ -33,28 +33,26 @@ FEEDS = {
         {"url": "https://www.nintendolife.com/feeds/latest", "priority": 3},
         {"url": "https://mynintendonews.com/feed/", "priority": 2},
         {"url": "https://kotaku.com/rss", "priority": 2},
-        {"url": "https://www.eurogamer.net/feed", "priority": 2},
         {"url": "https://pitchfork.com/rss/news/", "priority": 3},
-        {"url": "https://xxlmag.com/feed/", "priority": 2},
-        {"url": "https://hypebeast.com/music/feed", "priority": 3},
-        {"url": "https://allhiphop.com/feed/", "priority": 2}
+        {"url": "https://hypebeast.com/music/feed", "priority": 3}
     ]
 }
 
+# The target ratios: Politics/Sports (8m) vs Media/Tech (2m)
 SEGMENT_TIMES = {"politics": 8, "sports": 8, "media": 2, "tech": 2}
 SEEN_FILE = "seen_stories.txt"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# check duration of generated audio
 def get_audio_duration(file_path):
+    """checks audio length via ffprobe"""
     try:
         cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file_path]
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         return float(result.stdout.strip())
     except: return 0
 
-# grab diverse news stories across all sources
 def get_stratified_stories(configs, seen_hashes):
+    """gathers diverse news and avoids duplicates"""
     now = datetime.datetime.now(datetime.timezone.utc)
     category_pool = []
     seen_topics = set()
@@ -74,30 +72,38 @@ def get_stratified_stories(configs, seen_hashes):
             if h in seen_hashes: continue
             seen_topics.add(topic_key)
             feed_entries.append({"entry": e, "hash": h, "priority": cfg['priority']})
-        category_pool.extend(feed_entries[:3])
+        category_pool.extend(feed_entries[:4]) # Increased buffer for long segments
     category_pool.sort(key=lambda x: x['priority'], reverse=True)
-    return category_pool[:15]
+    return category_pool[:20] # Increased pool to ensure AI has enough content for 8 minutes
 
-# generate detailed segment scripts with llm
 async def generate_podcast_segment(name, configs, seen_hashes, date_str, attempt):
+    """generates segment script with specific length constraints"""
     stories = get_stratified_stories(configs, seen_hashes)
     if not stories: return "", [], []
     payload = ""
-    hashes = []
-    links = []
+    hashes, links = [], []
     for item in stories:
         e = item['entry']
         text = trafilatura.extract(trafilatura.fetch_url(e.link))
-        payload += f"STORY: {e.title}\nFACTS: {text[:2500] if text else e.summary}\n\n"
+        payload += f"STORY: {e.title}\nFACTS: {text[:3000] if text else e.summary}\n\n"
         hashes.append(item['hash'])
         links.append(f"[{name.upper()}] {e.title} - {e.link}")
+
+    # FORCE LENGTH: Multiplier of 160 words per minute
     word_target = int(SEGMENT_TIMES[name] * (160 + (attempt * 30)))
-    prompt = f"You are Orator. Today is {date_str}. Write the {name} segment. Target {word_target} words. NO intros/outros. NO asterisks."
+    
+    # Specific instructions based on segment priority
+    style_guide = "Go into exhaustive, granular detail for every story. Report every name, date, and quote available." if SEGMENT_TIMES[name] > 5 else "Be extremely concise. Rapid-fire summaries only."
+
+    prompt = (f"You are Orator. Today is {date_str}. Write the {name} segment. "
+              f"STRICT TARGET: {word_target} words. {style_guide} "
+              f"NO intros/outros. NO asterisks.")
+    
     resp = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": prompt + f"\n\nDATA:\n{payload}"}], temperature=0.2)
     return resp.choices[0].message.content, hashes, links
 
-# orchestrate full podcast creation and delivery
 async def main():
+    """main orchestrator for the podcast"""
     cst_now = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
     date_str = cst_now.strftime("%A, %B %d, %Y")
     file_date = cst_now.strftime("%Y-%m-%d")
@@ -108,15 +114,14 @@ async def main():
 
     for attempt in range(1, 4):
         full_segment_text = []
-        all_links = []
-        all_hashes = []
+        all_links, all_hashes = [], []
         for name, configs in FEEDS.items():
             script, hashes, links = await generate_podcast_segment(name, configs, seen_hashes, date_str, attempt)
             full_segment_text.append(script)
             all_hashes.extend(hashes)
             all_links.extend(links)
         
-        full_text = f"Hello, I'm Orator, and this is your briefing for {date_str}.\n\n" + "\n\n".join(full_segment_text) + "\n\nThat concludes today's Orator briefing. Goodbye."
+        full_text = f"Hello, I'm Orator, and this is your comprehensive briefing for {date_str}.\n\n" + "\n\n".join(full_segment_text) + "\n\nThat concludes today's Orator briefing. Goodbye."
         voice_file = "voice.mp3"
         await edge_tts.Communicate(full_text, "en-US-AndrewNeural", rate="+22%").save(voice_file)
         
@@ -125,16 +130,17 @@ async def main():
         if music_files: bg_music = random.choice(music_files)
         
         if os.path.exists(bg_music):
-            subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", final_file])
+            # BACKGROUND VOLUME FIXED AT 0.04
+            subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.04[bg];[0:a][bg]amix=inputs=2:duration=first", final_file])
         else: os.rename(voice_file, final_file)
 
         duration = get_audio_duration(final_file)
-        if duration >= 900 or attempt == 3:
-            if duration < 900: notice = "\n\n*Threshold Notice: Under 15m target.*"
+        if duration >= 1140 or attempt == 3: # Target 19-20m total (8+8+2+2 = 20)
+            if duration < 900: notice = "\n\n⚠️ *Threshold Notice: Under 15m target.*"
             break
         print(f"Attempt {attempt} too short ({duration/60:.2f}m). Retrying...")
 
-    webhook_content = f"**{file_date} - ORATOR DAILY NEWS FOR <@{os.getenv('DISCORD_USER_ID')}>**{notice}"
+    webhook_content = f"**{file_date} - - ORATOR DAILY NEWS FOR <@{os.getenv('DISCORD_USER_ID')}>**{notice}"
     webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=webhook_content)
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
     with open("sources.txt", "w") as f: f.write("\n".join(all_links))
