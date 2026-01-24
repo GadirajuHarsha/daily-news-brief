@@ -32,3 +32,5 @@ jobs:
           git add seen_stories.txt
           git commit -m "Update seen stories [skip ci]" || echo "No changes to commit"
           git push || echo "Nothing to push"
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg

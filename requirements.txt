@@ -3,4 +3,6 @@ openai>=1.0.0
 discord-webhook
 trafilatura
 edge-tts
+Pillow
+beautifulsoup4
 python-dotenv
