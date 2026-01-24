@@ -21,3 +21,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python main.py
+      - name: Commit seen stories
+        run: |
+          git config --global user.name 'News Bot'
+          git config --global user.email 'bot@actions.com'
+          git add seen_stories.txt
+          git commit -m "Update seen stories [skip ci]" || echo "No changes to commit"
+          git push
