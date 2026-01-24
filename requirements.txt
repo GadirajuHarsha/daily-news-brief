@@ -2,7 +2,9 @@ feedparser
 openai>=1.0.0
 discord-webhook
 trafilatura
-edge-tts
+kokoro>=0.1.9
+soundfile
+numpy
 Pillow
 beautifulsoup4
 python-dotenv

@@ -1,11 +1,14 @@
-import os, asyncio, feedparser, datetime, hashlib, trafilatura, edge_tts, subprocess, requests, random, glob, sys
+import os, asyncio, feedparser, datetime, hashlib, trafilatura, subprocess, requests, random, glob, sys
+import numpy as np
+import soundfile as sf
+from kokoro import KPipeline
 from openai import OpenAI
 from discord_webhook import DiscordWebhook
 
-# feed weighting
+# feeds are organized by three segments
 FEEDS = {
     "politics": [
-        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 18},
+        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 17},
         {"url": "https://apnews.com/hub/politics.rss", "weight": 20},
         {"url": "https://www.reutersagency.com/feed/?best-topics=political-news&post_type=best", "weight": 18},
         {"url": "https://thehill.com/homenews/feed/", "weight": 15},
@@ -19,15 +22,14 @@ FEEDS = {
         {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 17},
         {"url": "https://www.cbssports.com/xml/rss/itnba.xml", "weight": 17},
         {"url": "https://api.foxsports.com/v1/rss?partnerKey=zBa1u7En6Sjz9N8H&tag=nba", "weight": 17},
-        {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 17},
         {"url": "https://texaslonghorns.com/rss?path=football", "weight": 16},
         {"url": "https://texaslonghorns.com/rss?path=general", "weight": 14},
         {"url": "https://thedailytexan.com/category/sports/feed/", "weight": 10},
     ],
     "media": [
-        {"url": "https://www.serebii.net/index.rss", "weight": 14},
+        {"url": "https://www.serebii.net/index.rss", "weight": 15},
         {"url": "https://www.crunchyroll.com/news/rss", "weight": 13},
-        {"url": "https://pitchfork.com/rss/news/", "weight": 13},
+        {"url": "https://pitchfork.com/rss/news/", "weight": 12},
         {"url": "https://anitrendz.net/news/feed", "weight": 10},
         {"url": "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us", "weight": 10},
         {"url": "https://www.nintendolife.com/feeds/latest", "weight": 10},
@@ -41,18 +43,18 @@ FEEDS = {
     ]
 }
 
-# keyword multipliers (1.0 is neutral, 2.0 is double priority)
 MULTIPLIERS = {
-    "pokemon": 2.0, "serebii": 1.9, "shonen": 1.6, "luka": 2.0, "mavs": 1.8, 
-    "longhorns": 1.7, "iphone": 1.5, "rap": 1.5, "r&b": 1.6, "lakers": 1.5, 
-    "nba": 1.6, "zelda": 1.9, "mario": 1.6, "clairo": 1.8, "caesar": 1.8, 
-    "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8, "lego": 1.2
+    "pokemon": 2.0, "serebii": 1.9, "shonen": 1.5, "luka": 2.0, "mavs": 1.8, 
+    "longhorns": 1.7, "iphone": 1.5, "rap": 1.4, "r&b": 1.6, "lakers": 1.3, 
+    "nba": 1.6, "zelda": 1.9, "mario": 1.6, "clairo": 1.8, "daniel caesar": 1.8, 
+    "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8,
 }
 
-# bottom quotas
-MIN_STORY_FLOOR = {"politics": 8, "sports": 8, "media": 8}
+# story governance
+MIN_STORY_FLOOR = 8
+MAX_PER_SECTION = 16
+TOTAL_MAX = 40
 
-# constants
 SEEN_FILE = "seen_stories.txt"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -70,7 +72,7 @@ async def generate_segment(name, stories, date_str):
         links.append(f"[{name.upper()}] {e.title} - {e.link}")
     
     prompt = (f"You are Orator. Today is {date_str}. Write the {name} segment. "
-              f"STYLE: VERBOSE & GRANULAR. 4+ detailed paragraphs per story. Focus on factual density. No intros/outros. No symbols.")
+              f"STYLE: VERBOSE & GRANULAR. 4+ detailed paragraphs per story. Focus on factual density. No symbols.")
     
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -86,40 +88,53 @@ async def main():
     if not os.path.exists(SEEN_FILE): open(SEEN_FILE, 'w').close()
     with open(SEEN_FILE, "r") as f: seen_hashes = set(line.strip() for line in f)
 
-    final_payload = {cat: [] for cat in FEEDS.keys()}
-    all_links = []
+    # pass 1: score all stories and build category pools
+    category_pools = {cat: [] for cat in FEEDS.keys()}
+    all_scores = []
 
     for cat, configs in FEEDS.items():
-        pool = []
         seen_topics = set()
         for cfg in configs:
             feed = feedparser.parse(cfg['url'])
-            for i, e in enumerate(feed.entries):
+            # up to 16 from each rss feed as requested
+            for i, e in enumerate(feed.entries[:16]):
                 title = e.title.lower()
                 h = hashlib.md5(e.title.encode()).hexdigest()
                 if h in seen_hashes: continue
                 t_key = get_topic_key(title)
                 if t_key in seen_topics: continue
                 
-                # score calculation using compounding multipliers to let top stories skyrocket
-                score = float(cfg['weight'] * 20)
-                
-                # apply top-of-feed multiplier
-                if i < 3: 
-                    score *= 1.25
-                
-                # apply keyword multipliers
+                # compounded priority equation
+                score = float(cfg['weight'] * 50)
+                if i < 3: score *= 1.25
                 for kw, mult in MULTIPLIERS.items():
-                    if kw in title:
-                        score *= mult
+                    if kw in title: score *= mult
                 
-                pool.append({"score": score, "entry": e, "hash": h, "topic": t_key})
-        
-        pool.sort(key=lambda x: x['score'], reverse=True)
-        final_payload[cat] = pool[:MIN_STORY_FLOOR[cat]]
+                category_pools[cat].append({"score": score, "entry": e, "hash": h, "topic": t_key})
+                all_scores.append(score)
+                seen_topics.add(t_key)
 
-    # compilation and delivery
-    full_script = []
+    # pass 2: calculation of percentile threshold
+    percentile_threshold = np.percentile(all_scores, 85) if all_scores else 0
+    final_payload = {cat: [] for cat in FEEDS.keys()}
+    total_included = 0
+
+    for cat, pool in category_pools.items():
+        pool.sort(key=lambda x: x['score'], reverse=True)
+        
+        # apply the floor (first 8)
+        final_payload[cat] = pool[:MIN_STORY_FLOOR]
+        
+        # top-off with percentile stories up to the max limit
+        for candidate in pool[MIN_STORY_FLOOR:]:
+            if candidate['score'] >= percentile_threshold and len(final_payload[cat]) < MAX_PER_SECTION:
+                if (total_included + len(final_payload[cat])) < TOTAL_MAX:
+                    final_payload[cat].append(candidate)
+        
+        total_included += len(final_payload[cat])
+
+    # compilation
+    full_script, all_links = [], []
     for cat, stories in final_payload.items():
         script, links = await generate_segment(cat, stories, date_str)
         if script:
@@ -128,26 +143,34 @@ async def main():
             with open(SEEN_FILE, "a") as f:
                 for s in stories: f.write(f"{s['hash']}\n")
 
-    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nThat concludes today's briefing. This has been Orator, thank you for listening."
+    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nThat concludes today's briefing. Goodbye."
     
+    # audio production
     final_file = f"{file_date}_Orator.mp3"
-    voice_file = "voice.mp3"
-    await edge_tts.Communicate(full_text, "en-US-AndrewNeural", rate="+24%").save(voice_file)
+    voice_file = "voice.wav"
+    pipeline = KPipeline(lang_code='a') 
+    generator = pipeline(full_text, voice='af_bella', speed=1.1, split_pattern=r'\n+')
+    audio_chunks = [audio for gs, ps, audio in generator]
+    combined_audio = np.concatenate(audio_chunks)
+    sf.write(voice_file, combined_audio, 24000)
     
     bg_music = "bg_music.mp3"; music_files = glob.glob("music/*.mp3")
     if music_files: bg_music = random.choice(music_files)
     
+    # mixing - removed the -t flag to prevent abrupt cutting
     if os.path.exists(bg_music):
         subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", final_file], check=True)
-    else: os.rename(voice_file, final_file)
+    else: 
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, final_file], check=True)
 
+    # delivery
     webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
     with open("sources.txt", "w") as f: f.write("\n".join(all_links))
     with open("sources.txt", "rb") as f: webhook.add_file(file=f.read(), filename="sources.txt")
     webhook.execute()
     
-    for f in ["voice.mp3", final_file, "sources.txt"]: 
+    for f in [voice_file, final_file, "sources.txt"]: 
         if os.path.exists(f): os.remove(f)
 
 if __name__ == "__main__":
