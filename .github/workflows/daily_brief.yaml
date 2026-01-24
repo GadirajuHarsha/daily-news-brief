@@ -7,8 +7,10 @@ on:
 jobs:
   run-brief:
     runs-on: ubuntu-latest
+    # --- ADD THIS BLOCK ---
     permissions:
       contents: write
+    # ----------------------
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python
@@ -29,11 +31,4 @@ jobs:
           git config --global user.email 'bot@actions.com'
           git add seen_stories.txt
           git commit -m "Update seen stories [skip ci]" || echo "No changes to commit"
-          git push || echo "Push failed or nothing to push"
-      - name: Run Script
-        env:
-          PYTHONUNBUFFERED: "1"
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-        run: python main.py
+          git push || echo "Nothing to push"

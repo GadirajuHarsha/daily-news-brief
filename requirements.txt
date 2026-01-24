@@ -1,5 +1,4 @@
 feedparser
-edge-tts==7.2.1
-openai
-discord_webhook
+openai>=1.0.0
+discord-webhook
 python-dotenv

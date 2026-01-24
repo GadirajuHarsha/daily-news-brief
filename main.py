@@ -1,7 +1,6 @@
 import os
 import asyncio
 import feedparser
-import edge_tts
 import datetime
 import hashlib
 import urllib.request
@@ -11,7 +10,7 @@ from discord_webhook import DiscordWebhook
 # --- CONFIGURATION ---
 FEEDS = {
     "politics": "https://www.pbs.org/newshour/feeds/rss/politics", 
-    "tech": "https://www.theverge.com/tech/rss/index.xml",
+    "tech": "https://www.theverge.com/rss/index.xml", # Broad feed is more stable than tech-specific
     "sports_nba": "https://www.espn.com/espn/rss/nba/news",
     "sports_mavs": "https://feeds.feedburner.com/sportsblogs/mavsmoneyball.xml",
     "sports_ut": "https://texaslonghorns.com/rss?path=general",
@@ -22,8 +21,8 @@ FEEDS = {
 }
 
 # Hierarchical Weights
-POKEMON_KW = ["Pokemon", "Niantic", "Game Freak", "Pikachu"]
-MEDIA_KW = ["Zelda", "Mario", "Anime", "Manga", "Crunchyroll", "Nintendo"]
+POKEMON_KW = ["Pokemon", "Niantic", "Pikachu", "Game Freak"]
+MEDIA_KW = ["Zelda", "Mario", "Anime", "Manga", "Nintendo", "Link"]
 SPORTS_KW = ["Mavericks", "Mavs", "Doncic", "Kyrie", "Luka", "NBA"]
 LEGO_KW = ["Lego"]
 
@@ -34,17 +33,11 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def fetch_feed_safely(url):
     print(f"Attempting to fetch: {url}", flush=True)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/rss+xml, application/xml;q=0.9, */*;q=0.8'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
-            data = response.read()
-            parsed = feedparser.parse(data)
-            print(f"  Success! Found {len(parsed.entries)} entries.", flush=True)
-            return parsed
+            return feedparser.parse(response.read())
     except Exception as e:
         print(f"  ERROR fetching {url}: {e}", flush=True)
         return None
@@ -59,7 +52,7 @@ def get_best_stories(feed_urls, seen_hashes):
     now = datetime.datetime.now(datetime.timezone.utc)
     
     for entry in all_entries:
-        # STRICT 48-HOUR CUTOFF
+        # 48-HOUR CUTOFF
         pub_date = getattr(entry, 'published_parsed', None)
         if pub_date:
             dt = datetime.datetime(*pub_date[:6], tzinfo=datetime.timezone.utc)
@@ -80,8 +73,26 @@ def get_best_stories(feed_urls, seen_hashes):
     scored_entries.sort(key=lambda x: x[0], reverse=True)
     return scored_entries[:12]
 
+def generate_audio_openai(text, voice_name, filename):
+    """Uses OpenAI's stable TTS-1 model."""
+    # Mapping your preferred voices to OpenAI equivalents
+    # Andrew/Guy -> Onyx or Fable | Brian/Christopher -> Alloy or Nova
+    voice_map = {
+        "en-US-AndrewNeural": "onyx",
+        "en-US-BrianNeural": "alloy"
+    }
+    selected_voice = voice_map.get(voice_name, "alloy")
+    
+    response = client.audio.speech.create(
+        model="tts-1",
+        voice=selected_voice,
+        input=text,
+        speed=1.25 # Your requested 1.25x speed
+    )
+    response.stream_to_file(filename)
+
 async def main():
-    print("Starting News Briefing Script...", flush=True)
+    print("Starting News Briefing Script (OpenAI TTS Edition)...", flush=True)
     cst_now = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
     date_str = cst_now.strftime("%Y-%m-%d")
     spoken_date = cst_now.strftime("%A, %B %d, %Y")
@@ -107,44 +118,45 @@ async def main():
         entries = get_best_stories(t['urls'], seen_hashes)
         
         if not entries: 
-            print(f"  Result: No qualifying stories found for {t['name']}. Likely filtered by 48h limit or already seen.", flush=True)
+            print(f"  Result: No qualifying stories found.", flush=True)
             continue
 
-        print(f"  Summarizing {len(entries)} stories with OpenAI...", flush=True)
         data_payload = ""
+        category_hashes = []
         for score, e, h in entries:
             summary = getattr(e, 'summary', getattr(e, 'description', ''))
             data_payload += f"STORY: {e.title}\nDETAIL: {summary}\n\n"
-            with open(SEEN_FILE, "a") as f: f.write(f"{h}\n")
+            category_hashes.append(h)
 
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "system", "content": f"You are a professional news anchor. TODAY IS {spoken_date}. Use ONLY provided data. No outside info. No hallucinations. Speak fast."},
+            messages=[{"role": "system", "content": f"You are a professional news anchor. TODAY IS {spoken_date}. Use ONLY provided data. No outside info. No hallucinations."},
                       {"role": "user", "content": f"Briefing for {t['name']}:\n{data_payload}"}],
             temperature=0
         )
         script = resp.choices[0].message.content
         
-        print(f"  Generating Audio for {t['name']}...", flush=True)
         filename = f"{date_str}_{t['name']}.mp3"
         
         try:
-            communicate = edge_tts.Communicate(script, t['v'], rate="+25%")
-            await communicate.save(filename)
-            print(f"  Audio saved: {filename}", flush=True)
+            print(f"  Generating OpenAI Audio for {t['name']}...", flush=True)
+            generate_audio_openai(script, t['v'], filename)
+            
+            print(f"  Sending to Discord...", flush=True)
+            ping = f"<@{user_id}>" if user_id else ""
+            webhook = DiscordWebhook(url=webhook_url, content=f"{ping} 🎙️ **{spoken_date}** | {t['name'].upper()}")
+            with open(filename, "rb") as f:
+                webhook.add_file(file=f.read(), filename=filename)
+            webhook.execute()
+            
+            # ONLY SAVE HASHES IF SUCCESSFUL
+            with open(SEEN_FILE, "a") as f:
+                for h in category_hashes: f.write(f"{h}\n")
+            
+            os.remove(filename)
+            print(f"  Finished {t['name']}.", flush=True)
         except Exception as e:
-            print(f"  TTS Error for {t['name']}: {e}", flush=True)
-            continue
-        
-        print(f"  Sending {t['name']} to Discord...", flush=True)
-        ping = f"<@{user_id}>" if user_id else ""
-        webhook = DiscordWebhook(url=webhook_url, content=f"{ping} 🎙️ **{spoken_date}** | {t['name'].upper()}")
-        with open(filename, "rb") as f:
-            webhook.add_file(file=f.read(), filename=filename)
-        
-        webhook.execute()
-        os.remove(filename)
-        print(f"  Finished {t['name']}.", flush=True)
+            print(f"  CRITICAL ERROR for {t['name']}: {e}", flush=True)
 
     print("Workflow Complete.", flush=True)
 
