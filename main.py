@@ -8,38 +8,38 @@ from discord_webhook import DiscordWebhook
 # feeds are organized by three segments
 FEEDS = {
     "politics": [
-        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 17},
+        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 18},
         {"url": "https://apnews.com/hub/politics.rss", "weight": 20},
         {"url": "https://www.reutersagency.com/feed/?best-topics=political-news&post_type=best", "weight": 18},
         {"url": "https://thehill.com/homenews/feed/", "weight": 15},
         {"url": "https://prospect.org/api/rss/content.rss", "weight": 13},
-        {"url": "https://jacobin.com/feed", "weight": 12},
-        {"url": "https://gao.gov/blog/feed", "weight": 10},
+        {"url": "https://jacobin.com/feed", "weight": 13},
+        {"url": "https://gao.gov/blog/feed", "weight": 11},
     ],
     "sports": [
-        {"url": "https://www.espn.com/espn/rss/nba/news", "weight": 20},
-        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "weight": 18},
-        {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 17},
-        {"url": "https://www.cbssports.com/xml/rss/itnba.xml", "weight": 17},
-        {"url": "https://api.foxsports.com/v1/rss?partnerKey=zBa1u7En6Sjz9N8H&tag=nba", "weight": 17},
-        {"url": "https://texaslonghorns.com/rss?path=football", "weight": 16},
-        {"url": "https://texaslonghorns.com/rss?path=general", "weight": 14},
-        {"url": "https://thedailytexan.com/category/sports/feed/", "weight": 10},
+        {"url": "https://www.espn.com/espn/rss/nba/news", "weight": 18},
+        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "weight": 16},
+        {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 15},
+        {"url": "https://www.cbssports.com/xml/rss/itnba.xml", "weight": 15},
+        {"url": "https://api.foxsports.com/v1/rss?partnerKey=zBa1u7En6Sjz9N8H&tag=nba", "weight": 15},
+        {"url": "https://texaslonghorns.com/rss?path=football", "weight": 14},
+        {"url": "https://texaslonghorns.com/rss?path=general", "weight": 12},
+        {"url": "https://thedailytexan.com/category/sports/feed/", "weight": 8},
     ],
     "media": [
-        {"url": "https://www.serebii.net/index.rss", "weight": 15},
-        {"url": "https://www.crunchyroll.com/news/rss", "weight": 13},
-        {"url": "https://pitchfork.com/rss/news/", "weight": 12},
-        {"url": "https://anitrendz.net/news/feed", "weight": 10},
-        {"url": "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us", "weight": 10},
-        {"url": "https://www.nintendolife.com/feeds/latest", "weight": 10},
-        {"url": "https://aws.amazon.com/blogs/aws/feed/", "weight": 10},
-        {"url": "https://hypebeast.com/music/feed", "weight": 8},
-        {"url": "https://www.engadget.com/rss.xml", "weight": 7},
-        {"url": "https://www.wired.com/feed/category/gear/latest/rss", "weight": 7},
-        {"url": "https://arstechnica.com/feed/", "weight": 7},
-        {"url": "https://corp.ign.com/feeds/news", "weight": 7},
-        {"url": "https://www.theverge.com/rss/index.xml", "weight": 5},
+        {"url": "https://www.serebii.net/index.rss", "weight": 17},
+        {"url": "https://www.crunchyroll.com/news/rss", "weight": 15},
+        {"url": "https://pitchfork.com/rss/news/", "weight": 14},
+        {"url": "https://anitrendz.net/news/feed", "weight": 12},
+        {"url": "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us", "weight": 12},
+        {"url": "https://www.nintendolife.com/feeds/latest", "weight": 12},
+        {"url": "https://aws.amazon.com/blogs/aws/feed/", "weight": 12},
+        {"url": "https://hypebeast.com/music/feed", "weight": 10},
+        {"url": "https://www.engadget.com/rss.xml", "weight": 9},
+        {"url": "https://www.wired.com/feed/category/gear/latest/rss", "weight": 9},
+        {"url": "https://arstechnica.com/feed/", "weight": 9},
+        {"url": "https://corp.ign.com/feeds/news", "weight": 9},
+        {"url": "https://www.theverge.com/rss/index.xml", "weight": 7},
     ]
 }
 
@@ -47,12 +47,12 @@ MULTIPLIERS = {
     "pokemon": 2.0, "serebii": 1.9, "shonen": 1.5, "luka": 2.0, "mavs": 1.8, 
     "longhorns": 1.7, "iphone": 1.5, "rap": 1.4, "r&b": 1.6, "lakers": 1.3, 
     "nba": 1.6, "zelda": 1.9, "mario": 1.6, "clairo": 1.8, "daniel caesar": 1.8, 
-    "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8,
+    "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8, "economy": 1.4, "texas": 1.5
 }
 
 # story governance
-MIN_STORY_FLOOR = 8
-MAX_PER_SECTION = 16
+MIN_STORY_FLOOR = 10
+MAX_PER_SECTION = 15
 TOTAL_MAX = 40
 
 SEEN_FILE = "seen_stories.txt"
@@ -88,7 +88,7 @@ async def main():
     if not os.path.exists(SEEN_FILE): open(SEEN_FILE, 'w').close()
     with open(SEEN_FILE, "r") as f: seen_hashes = set(line.strip() for line in f)
 
-    # pass 1: score all stories and build category pools
+    # pass 1: score all stories
     category_pools = {cat: [] for cat in FEEDS.keys()}
     all_scores = []
 
@@ -96,7 +96,6 @@ async def main():
         seen_topics = set()
         for cfg in configs:
             feed = feedparser.parse(cfg['url'])
-            # up to 16 from each rss feed as requested
             for i, e in enumerate(feed.entries[:16]):
                 title = e.title.lower()
                 h = hashlib.md5(e.title.encode()).hexdigest()
@@ -104,7 +103,7 @@ async def main():
                 t_key = get_topic_key(title)
                 if t_key in seen_topics: continue
                 
-                # compounded priority equation
+                # initial weight multiplier * 50 to let scores scale effectively
                 score = float(cfg['weight'] * 50)
                 if i < 3: score *= 1.25
                 for kw, mult in MULTIPLIERS.items():
@@ -114,24 +113,20 @@ async def main():
                 all_scores.append(score)
                 seen_topics.add(t_key)
 
-    # pass 2: calculation of percentile threshold
-    percentile_threshold = np.percentile(all_scores, 85) if all_scores else 0
+    # pass 2: select using percentile threshold (Top 15%)
+    threshold = np.percentile(all_scores, 85) if all_scores else 0
     final_payload = {cat: [] for cat in FEEDS.keys()}
-    total_included = 0
+    total_count = 0
 
     for cat, pool in category_pools.items():
         pool.sort(key=lambda x: x['score'], reverse=True)
-        
-        # apply the floor (first 8)
+        # guarantee floor
         final_payload[cat] = pool[:MIN_STORY_FLOOR]
-        
-        # top-off with percentile stories up to the max limit
-        for candidate in pool[MIN_STORY_FLOOR:]:
-            if candidate['score'] >= percentile_threshold and len(final_payload[cat]) < MAX_PER_SECTION:
-                if (total_included + len(final_payload[cat])) < TOTAL_MAX:
-                    final_payload[cat].append(candidate)
-        
-        total_included += len(final_payload[cat])
+        # add top percentile stories up to ceiling
+        for s in pool[MIN_STORY_FLOOR:]:
+            if s['score'] >= threshold and len(final_payload[cat]) < MAX_PER_SECTION and total_count < TOTAL_MAX:
+                final_payload[cat].append(s)
+        total_count += len(final_payload[cat])
 
     # compilation
     full_script, all_links = [], []
@@ -143,13 +138,13 @@ async def main():
             with open(SEEN_FILE, "a") as f:
                 for s in stories: f.write(f"{s['hash']}\n")
 
-    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nThat concludes today's briefing. Goodbye."
+    full_text = f"Hello, I'm Orator, and this is your briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nGoodbye."
     
-    # audio production
+    # audio production with am_michael
     final_file = f"{file_date}_Orator.mp3"
     voice_file = "voice.wav"
     pipeline = KPipeline(lang_code='a') 
-    generator = pipeline(full_text, voice='af_bella', speed=1.1, split_pattern=r'\n+')
+    generator = pipeline(full_text, voice='am_michael', speed=1.1, split_pattern=r'\n+')
     audio_chunks = [audio for gs, ps, audio in generator]
     combined_audio = np.concatenate(audio_chunks)
     sf.write(voice_file, combined_audio, 24000)
@@ -157,14 +152,14 @@ async def main():
     bg_music = "bg_music.mp3"; music_files = glob.glob("music/*.mp3")
     if music_files: bg_music = random.choice(music_files)
     
-    # mixing - removed the -t flag to prevent abrupt cutting
+    # quality-focused ffmpeg mix: forced 44.1kHz and 192k bitrate
     if os.path.exists(bg_music):
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", final_file], check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", "-ar", "44100", "-b:a", "192k", final_file], check=True)
     else: 
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, final_file], check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-ar", "44100", "-b:a", "192k", final_file], check=True)
 
     # delivery
-    webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
+    webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING**")
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
     with open("sources.txt", "w") as f: f.write("\n".join(all_links))
     with open("sources.txt", "rb") as f: webhook.add_file(file=f.read(), filename="sources.txt")
