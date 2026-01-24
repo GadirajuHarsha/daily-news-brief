@@ -2,112 +2,128 @@ import os
 import asyncio
 import feedparser
 import edge_tts
+import datetime
+import hashlib
 from openai import OpenAI
 from discord_webhook import DiscordWebhook
 
 FEEDS = {
-    "politics": "https://www.allsides.com/rss/unbiased-balanced-news",
+    "politics": "https://www.theverge.com/policy/rss/index.xml",
     "sports": "https://www.espn.com/espn/rss/nba/news",
-    "tech": "https://www.techmeme.com/feed.xml",
+    "ut_sports": "https://texaslonghorns.com/rss?path=general",
+    "tech": "https://www.theverge.com/tech/rss/index.xml",
     "gaming": "https://www.nintendolife.com/feeds/latest"
 }
 
-PRIORITY_KEYWORDS = ["NBA", "Longhorns", "Nintendo", "Switch", "UT Austin", "LeBron", "iPhone", "NVIDIA", "Tesla"]
+PRIORITY_KEYWORDS = ["NBA", "Mavericks", "Luka", "Kyrie", "Longhorns", "Nintendo", "Switch", "iPhone", "UT Austin"]
+SEEN_FILE = "seen_stories.txt"
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def get_best_stories(feed_url, limit=8):
+def get_seen_hashes():
+    if os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, "r") as f:
+            return set(line.strip() for line in f)
+    return set()
+
+def save_seen_hash(content_hash):
+    with open(SEEN_FILE, "a") as f:
+        f.write(f"{content_hash}\n")
+
+def get_best_stories(category, feed_url, seen_hashes):
     feed = feedparser.parse(feed_url)
     scored_entries = []
     
     for entry in feed.entries:
+        story_hash = hashlib.md5(entry.title.encode()).hexdigest()
+        if story_hash in seen_hashes:
+            continue
+
         score = 0
         title = entry.title.lower()
         if any(word.lower() in title for word in PRIORITY_KEYWORDS):
-            score += 30
+            score += 50
         
-        if "poll:" in title or "discussion:" in title:
-            continue
+        if "poll:" in title: continue
 
-        scored_entries.append((score, entry))
+        scored_entries.append((score, entry, story_hash))
     
     scored_entries.sort(key=lambda x: x[0], reverse=True)
-    return [e[1] for e in scored_entries[:limit]]
+    return scored_entries
 
-def generate_script(category, raw_data):
+def generate_script(category, raw_data, length_minutes):
     if not raw_data.strip():
-        return f"No detailed updates for {category} were found in the feed right now."
-        
-    category_instructions = {
-        "tech": "Focus on consumer products, hardware, and devices. Minimize talk of corporate acquisitions or executive changes unless they affect the products directly.",
-        "sports": "Be extremely specific with names and locations. If a game is cancelled, say which teams. Provide a play-by-play or statistical feel where possible.",
-        "politics": "Synthesize the different viewpoints provided in the text. Ensure you mention how different sides are framing the same event.",
-        "gaming": "Focus on game releases, patches, and hardware news."
+        return f"No new updates for {category} since your last briefing."
+
+    category_rules = {
+        "sports": "Focus heavily on the Dallas Mavericks and UT Austin Longhorns. Be extremely specific. Name players, scores, and specific matchups. No generalizations like 'teams are looking at trades.' If a game is rescheduled, say exactly who was playing and when.",
+        "politics": "Assume I have full context on current events. Skip the 'introduction' to topics. Give me the latest strategic update, vote count, or policy shift. Be specific with names and dates.",
+        "tech": "Focus on consumer hardware and product launches. Ignore corporate board-room drama unless it changes a product I use.",
+        "gaming": "Focus on Nintendo and major releases. No community polls."
     }
 
     prompt = f"""
-    You are a professional podcast scriptwriter. Create a 3 to 4-minute spoken-word narrative for a {category} briefing.
+    You are a high-level news orator for a personal {category} podcast. 
+    TARGET LENGTH: {length_minutes} minutes of speech.
     
-    SPECIAL INSTRUCTIONS FOR {category.upper()}: {category_instructions.get(category, "")}
+    STRICT RULES:
+    1. NO intro/outro like 'Stay tuned' or 'Welcome back'.
+    2. DO NOT use headlines. Speak in a continuous, fast-paced narrative.
+    3. NO sweeping claims. Use names, dates, and titles for EVERYTHING.
+    4. Assume the listener is an expert. Don't explain basic terms.
+    5. Write dates as words (e.g., 'January twenty-third') for the TTS.
+    6. Specificity: {category_rules.get(category, "")}
 
-    STRICT FORMATTING RULES:
-    1. DO NOT include headlines, bullet points, or numbers. 
-    2. DO NOT use words like 'Script:', 'Title:', or asterisks like '**'.
-    3. Use smooth transitions between stories (e.g., 'Turning now to...', 'In other news...').
-    4. Speak in full, descriptive sentences. Be specific with names, dates, and team names.
-    5. Write dates as words (e.g., 'January twenty-fifth') to ensure the TTS reads them correctly.
-    6. NO POLLS or questions to the audience. 
-    7. This is a solo oration. Act as the single source of truth.
-
-    RAW DATA:
+    NEWS DATA:
     {raw_data}
     """
     
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a professional radio news anchor. You write scripts that flow naturally without any structural markers or metadata."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3
+        messages=[{"role": "system", "content": "You are a specific, professional news anchor. You hate generalizations and filler. You provide only hard facts and specific updates."},
+                  {"role": "user", "content": prompt}],
+        temperature=0.2
     )
     return response.choices[0].message.content
 
 async def main():
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    seen_hashes = get_seen_hashes()
     
-    for category, url in FEEDS.items():
-        print(f"Generating {category} briefing...")
-        stories = get_best_stories(url)
-        
-        extracted_stories = []
-        for s in stories:
+    sports_data = get_best_stories("sports", FEEDS["sports"], seen_hashes) + \
+                  get_best_stories("ut_sports", FEEDS["ut_sports"], seen_hashes)
+    sports_data.sort(key=lambda x: x[0], reverse=True)
+
+    briefings = [
+        {"cat": "politics", "data": get_best_stories("politics", FEEDS["politics"], seen_hashes), "len": "5", "voice": "en-US-AndrewMultilingualNeural"},
+        {"cat": "sports", "data": sports_data, "len": "4", "voice": "en-US-AndrewNeural"},
+        {"cat": "tech", "data": get_best_stories("tech", FEEDS["tech"], seen_hashes), "len": "2.5", "voice": "en-US-BrianNeural"},
+        {"cat": "gaming", "data": get_best_stories("gaming", FEEDS["gaming"], seen_hashes), "len": "2.5", "voice": "en-US-AvaMultilingualNeural"}
+    ]
+
+    for b in briefings:
+        print(f"Processing {b['cat']}...")
+        top_stories = b['data'][:10]
+        if not top_stories: continue
+
+        extracted = []
+        for score, s, h in top_stories:
             content = getattr(s, 'summary', getattr(s, 'description', ''))
-            extracted_stories.append(f"STORY TITLE: {s.title}\nSTORY CONTENT: {content}")
+            extracted.append(f"STORY: {s.title}\nDETAIL: {content}")
+            save_seen_hash(h)
+
+        script = generate_script(b['cat'], "\n\n".join(extracted), b['len'])
+        filename = f"{date_str}_{b['cat']}.mp3"
         
-        raw_text = "\n\n".join(extracted_stories)
-        script = generate_script(category, raw_text)
-        
-        filename = f"{category}_brief.mp3"
-        
-        voices = {
-            "politics": "en-US-SteffanNeural", 
-            "sports": "en-US-AndrewNeural",
-            "tech": "en-US-BrianNeural",
-            "gaming": "en-US-EmmaNeural"
-        }
-        voice = voices.get(category, "en-US-ChristopherNeural")
-        
-        communicate = edge_tts.Communicate(script, voice)
+        communicate = edge_tts.Communicate(script, b['voice'], rate="+25%")
         await communicate.save(filename)
         
-        webhook = DiscordWebhook(url=webhook_url, content=f"🎙️ **{category.capitalize()} Podcast Briefing**")
+        webhook = DiscordWebhook(url=webhook_url, content=f"📅 **{date_str}** | {b['cat'].upper()} PODCAST")
         with open(filename, "rb") as f:
             webhook.add_file(file=f.read(), filename=filename)
         webhook.execute()
-        
-        if os.path.exists(filename):
-            os.remove(filename)
+        os.remove(filename)
 
 if __name__ == "__main__":
     asyncio.run(main())
