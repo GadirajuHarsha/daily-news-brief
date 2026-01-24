@@ -3,8 +3,6 @@ on:
   schedule:
     - cron: '0 13 * * *'
   workflow_dispatch:
-  repository_dispatch: # Allows manual trigger from external APIs
-    types: [trigger-news]
 
 jobs:
   run-brief:
@@ -31,4 +29,4 @@ jobs:
           git config --global user.email 'bot@actions.com'
           git add seen_stories.txt
           git commit -m "Update seen stories [skip ci]" || echo "No changes to commit"
-          git push
+          git push || echo "Push failed or nothing to push"
