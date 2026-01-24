@@ -1,15 +1,16 @@
 name: Daily News Brief
 on:
   schedule:
-    - cron: '0 13 * * *'  # runs daily at 8am cst (13:00 utc)
-  workflow_dispatch:      # allows manual trigger
+    - cron: '0 13 * * *'
+  workflow_dispatch:
 
 jobs:
-  build:
+  run-brief:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
