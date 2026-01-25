@@ -4,10 +4,8 @@ on:
     branches: [ main ]
   workflow_dispatch:
   schedule:
-    # 14:17 UTC is exactly 8:17 AM CST (UTC-6)
-    # Using '17' avoids the massive 14:00 UTC server rush
-    # - cron: '17 14 * * *'
-    - cron: '20 6 * * *'
+    # 14:12 UTC is 8:12 AM CST. Dodges the '00' congestion.
+    - cron: '12 14 * * *'
 
 jobs:
   run-brief:

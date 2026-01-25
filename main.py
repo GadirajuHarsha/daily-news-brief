@@ -50,9 +50,9 @@ MULTIPLIERS = {
     "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8, "economy": 1.4, "texas": 1.5
 }
 
-MIN_STORY_FLOOR = 10
-MAX_PER_SECTION = 16
-TOTAL_MAX = 40
+MIN_STORY_FLOOR = 8
+MAX_PER_SECTION = 14
+TOTAL_MAX = 36
 
 SEEN_FILE = "seen_stories.txt"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -101,7 +101,7 @@ async def main():
                 t_key = get_topic_key(title)
                 if t_key in seen_topics: continue
                 
-                score = float(cfg['weight'] * 50)
+                score = float(cfg['weight'] * 40)
                 if i < 3: score *= 1.25
                 for kw, mult in MULTIPLIERS.items():
                     if kw in title: score *= mult
@@ -116,9 +116,7 @@ async def main():
 
     for cat, pool in category_pools.items():
         pool.sort(key=lambda x: x['score'], reverse=True)
-        # Apply the 10-story floor
         final_payload[cat] = pool[:MIN_STORY_FLOOR]
-        # Top-off with high performers
         for s in pool[MIN_STORY_FLOOR:]:
             if s['score'] >= threshold and len(final_payload[cat]) < MAX_PER_SECTION and total_count < TOTAL_MAX:
                 final_payload[cat].append(s)
@@ -146,11 +144,11 @@ async def main():
     bg_music = "bg_music.mp3"; music_files = glob.glob("music/*.mp3")
     if music_files: bg_music = random.choice(music_files)
     
-    # MASTERING: 128k bitrate and Mono (-ac 1) ensures ~20MB for a 22-minute file
+    # MASTERING: 64k Mono is the "Golden Ratio" for 30-minute files on Discord
     if os.path.exists(bg_music):
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", "-ac", "1", "-ar", "44100", "-b:a", "128k", final_file], check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", "-ac", "1", "-ar", "44100", "-b:a", "64k", final_file], check=True)
     else: 
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-ac", "1", "-ar", "44100", "-b:a", "128k", final_file], check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-ac", "1", "-ar", "44100", "-b:a", "64k", final_file], check=True)
 
     webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING**")
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
