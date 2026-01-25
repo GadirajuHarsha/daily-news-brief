@@ -50,9 +50,8 @@ MULTIPLIERS = {
     "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8, "economy": 1.4, "texas": 1.5
 }
 
-# story governance
 MIN_STORY_FLOOR = 10
-MAX_PER_SECTION = 15
+MAX_PER_SECTION = 16
 TOTAL_MAX = 40
 
 SEEN_FILE = "seen_stories.txt"
@@ -91,7 +90,6 @@ async def main():
     category_pools = {cat: [] for cat in FEEDS.keys()}
     all_scores = []
 
-    # fetch and score
     for cat, configs in FEEDS.items():
         seen_topics = set()
         for cfg in configs:
@@ -112,20 +110,20 @@ async def main():
                 all_scores.append(score)
                 seen_topics.add(t_key)
 
-    # select using percentile (Top 15%)
     threshold = np.percentile(all_scores, 85) if all_scores else 0
     final_payload = {cat: [] for cat in FEEDS.keys()}
     total_count = 0
 
     for cat, pool in category_pools.items():
         pool.sort(key=lambda x: x['score'], reverse=True)
+        # Apply the 10-story floor
         final_payload[cat] = pool[:MIN_STORY_FLOOR]
+        # Top-off with high performers
         for s in pool[MIN_STORY_FLOOR:]:
             if s['score'] >= threshold and len(final_payload[cat]) < MAX_PER_SECTION and total_count < TOTAL_MAX:
                 final_payload[cat].append(s)
         total_count += len(final_payload[cat])
 
-    # compile
     full_script, all_links = [], []
     for cat, stories in final_payload.items():
         script, links = await generate_segment(cat, stories, date_str)
@@ -135,13 +133,11 @@ async def main():
             with open(SEEN_FILE, "a") as f:
                 for s in stories: f.write(f"{s['hash']}\n")
 
-    full_text = f"Hello, I'm Orator, and this is your briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nGoodbye."
+    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nGoodbye."
     
-    # high quality audio production
     final_file = f"{file_date}_Orator.mp3"
     voice_file = "voice.wav"
     pipeline = KPipeline(lang_code='a') 
-    # using am_michael for better resonance
     generator = pipeline(full_text, voice='am_michael', speed=1.1, split_pattern=r'\n+')
     audio_chunks = [audio for gs, ps, audio in generator]
     combined_audio = np.concatenate(audio_chunks)
@@ -150,11 +146,11 @@ async def main():
     bg_music = "bg_music.mp3"; music_files = glob.glob("music/*.mp3")
     if music_files: bg_music = random.choice(music_files)
     
-    # mastering: force 44.1kHz and 192kbps for Discord clarity
+    # MASTERING: 128k bitrate and Mono (-ac 1) ensures ~20MB for a 22-minute file
     if os.path.exists(bg_music):
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", "-ar", "44100", "-b:a", "192k", final_file], check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", "-ac", "1", "-ar", "44100", "-b:a", "128k", final_file], check=True)
     else: 
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-ar", "44100", "-b:a", "192k", final_file], check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-ac", "1", "-ar", "44100", "-b:a", "128k", final_file], check=True)
 
     webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING**")
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
