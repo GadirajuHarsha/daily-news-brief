@@ -51,12 +51,21 @@ MULTIPLIERS = {
 }
 
 # story governance
-MIN_STORY_FLOOR = 10
-MAX_PER_SECTION = 15
-TOTAL_MAX = 40
+MIN_STORY_FLOOR = 5 
+MAX_PER_SECTION = 8
+TOTAL_MAX = 18 
 
 SEEN_FILE = "seen_stories.txt"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+DISCORD_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+def send_status(msg):
+    """Sends a non-tagging status update to Discord so you can track progress."""
+    print(msg)
+    try:
+        webhook = DiscordWebhook(url=DISCORD_URL, content=f"**Status:** {msg}")
+        webhook.execute()
+    except: pass
 
 def get_topic_key(title):
     words = [w for w in title.lower().split() if len(w) > 3]
@@ -64,6 +73,7 @@ def get_topic_key(title):
 
 async def generate_segment(name, stories, date_str):
     if not stories: return "", []
+    send_status(f"Generating script for **{name.upper()}** ({len(stories)} stories)...")
     payload, links = "", []
     for item in stories:
         e = item['entry']
@@ -85,18 +95,19 @@ async def main():
     cst_now = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
     date_str, file_date = cst_now.strftime("%A, %B %d, %Y"), cst_now.strftime("%Y-%m-%d")
     
+    send_status(f"Starting Orator Pipeline for **{date_str}**")
+    
     if not os.path.exists(SEEN_FILE): open(SEEN_FILE, 'w').close()
     with open(SEEN_FILE, "r") as f: seen_hashes = set(line.strip() for line in f)
 
-    # pass 1: score all stories and build category pools
     category_pools = {cat: [] for cat in FEEDS.keys()}
     all_scores = []
 
+    send_status("Parsing RSS feeds and calculating scores...")
     for cat, configs in FEEDS.items():
         seen_topics = set()
         for cfg in configs:
             feed = feedparser.parse(cfg['url'])
-            # up to 16 from each rss feed as requested
             for i, e in enumerate(feed.entries[:16]):
                 title = e.title.lower()
                 h = hashlib.md5(e.title.encode()).hexdigest()
@@ -104,7 +115,6 @@ async def main():
                 t_key = get_topic_key(title)
                 if t_key in seen_topics: continue
                 
-                # compounded priority equation
                 score = float(cfg['weight'] * 50)
                 if i < 3: score *= 1.25
                 for kw, mult in MULTIPLIERS.items():
@@ -114,26 +124,18 @@ async def main():
                 all_scores.append(score)
                 seen_topics.add(t_key)
 
-    # pass 2: calculation of percentile threshold
-    percentile_threshold = np.percentile(all_scores, 90) if all_scores else 0
+    threshold = np.percentile(all_scores, 90) if all_scores else 0
     final_payload = {cat: [] for cat in FEEDS.keys()}
-    total_included = 0
+    total_count = 0
 
     for cat, pool in category_pools.items():
         pool.sort(key=lambda x: x['score'], reverse=True)
-        
-        # apply the floor (first 8)
         final_payload[cat] = pool[:MIN_STORY_FLOOR]
-        
-        # top-off with percentile stories up to the max limit
-        for candidate in pool[MIN_STORY_FLOOR:]:
-            if candidate['score'] >= percentile_threshold and len(final_payload[cat]) < MAX_PER_SECTION:
-                if (total_included + len(final_payload[cat])) < TOTAL_MAX:
-                    final_payload[cat].append(candidate)
-        
-        total_included += len(final_payload[cat])
+        for s in pool[MIN_STORY_FLOOR:]:
+            if s['score'] >= threshold and len(final_payload[cat]) < MAX_PER_SECTION and total_count < TOTAL_MAX:
+                final_payload[cat].append(s)
+        total_count += len(final_payload[cat])
 
-    # compilation
     full_script, all_links = [], []
     for cat, stories in final_payload.items():
         script, links = await generate_segment(cat, stories, date_str)
@@ -143,33 +145,67 @@ async def main():
             with open(SEEN_FILE, "a") as f:
                 for s in stories: f.write(f"{s['hash']}\n")
 
-    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nThat concludes today's briefing. Goodbye."
+    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nGoodbye."
     
-    # audio production
+    send_status(f"Initializing Kokoro Audio Generation (~{len(full_text)//100} sentences)...")
     final_file = f"{file_date}_Orator.mp3"
     voice_file = "voice.wav"
     pipeline = KPipeline(lang_code='a') 
     generator = pipeline(full_text, voice='am_michael', speed=1.1, split_pattern=r'\n+')
-    audio_chunks = [audio for gs, ps, audio in generator]
+    
+    audio_chunks = []
+    for gs, ps, audio in generator:
+        audio_chunks.append(audio)
+    
     combined_audio = np.concatenate(audio_chunks)
     sf.write(voice_file, combined_audio, 24000)
     
     bg_music = "bg_music.mp3"; music_files = glob.glob("music/*.mp3")
     if music_files: bg_music = random.choice(music_files)
     
-    # mixing - removed the -t flag to prevent abrupt cutting
-    if os.path.exists(bg_music):
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", final_file], check=True)
-    else: 
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, final_file], check=True)
+    # --- FAILSAFE MASTERING LOOP ---
+    # Discord Limit is 25MB (26,214,400 bytes). We target 24MB for safety.
+    bitrates = ["160k", "128k", "96k", "64k"]
+    success = False
 
-    # delivery
-    webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
+    for br in bitrates:
+        send_status(f"Mastering audio at **{br}** Stereo (Upsampled to 44.1kHz)...")
+        
+        if os.path.exists(bg_music):
+            cmd = [
+                "ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, 
+                "-filter_complex", 
+                "[0:a]aresample=44100,pan=stereo|c0=c0|c1=c0[v];" 
+                "[1:a]aresample=44100,volume=0.08[bg];"
+                "[v][bg]amix=inputs=2:duration=first[out]",
+                "-map", "[out]", "-ar", "44100", "-b:a", br, final_file
+            ]
+        else:
+            cmd = ["ffmpeg", "-y", "-i", voice_file, "-ar", "44100", "-b:a", br, final_file]
+            
+        subprocess.run(cmd, check=True)
+        
+        fsize_mb = os.path.getsize(final_file) / (1024 * 1024)
+        if fsize_mb < 24.5:
+            send_status(f"Final file size: **{fsize_mb:.2f} MB**. Within Discord limits.")
+            success = True
+            break
+        else:
+            send_status(f"File too large ({fsize_mb:.2f} MB). Retrying with lower bitrate...")
+
+    if not success:
+        send_status("CRITICAL: Could not compress file under 25MB even at 64k. Aborting.")
+        return
+
+    # Final Delivery
+    send_status("Uploading briefing to Discord...")
+    webhook = DiscordWebhook(url=DISCORD_URL, content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
     with open("sources.txt", "w") as f: f.write("\n".join(all_links))
     with open("sources.txt", "rb") as f: webhook.add_file(file=f.read(), filename="sources.txt")
     webhook.execute()
     
+    send_status("Briefing delivered successfully. Cleaning up.")
     for f in [voice_file, final_file, "sources.txt"]: 
         if os.path.exists(f): os.remove(f)
 
