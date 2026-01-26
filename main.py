@@ -50,9 +50,10 @@ MULTIPLIERS = {
     "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8, "economy": 1.4, "texas": 1.5
 }
 
-MIN_STORY_FLOOR = 8
-MAX_PER_SECTION = 14
-TOTAL_MAX = 36
+# story governance
+MIN_STORY_FLOOR = 10
+MAX_PER_SECTION = 15
+TOTAL_MAX = 40
 
 SEEN_FILE = "seen_stories.txt"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -87,6 +88,7 @@ async def main():
     if not os.path.exists(SEEN_FILE): open(SEEN_FILE, 'w').close()
     with open(SEEN_FILE, "r") as f: seen_hashes = set(line.strip() for line in f)
 
+    # pass 1: score all stories and build category pools
     category_pools = {cat: [] for cat in FEEDS.keys()}
     all_scores = []
 
@@ -94,6 +96,7 @@ async def main():
         seen_topics = set()
         for cfg in configs:
             feed = feedparser.parse(cfg['url'])
+            # up to 16 from each rss feed as requested
             for i, e in enumerate(feed.entries[:16]):
                 title = e.title.lower()
                 h = hashlib.md5(e.title.encode()).hexdigest()
@@ -101,7 +104,8 @@ async def main():
                 t_key = get_topic_key(title)
                 if t_key in seen_topics: continue
                 
-                score = float(cfg['weight'] * 40)
+                # compounded priority equation
+                score = float(cfg['weight'] * 50)
                 if i < 3: score *= 1.25
                 for kw, mult in MULTIPLIERS.items():
                     if kw in title: score *= mult
@@ -110,18 +114,26 @@ async def main():
                 all_scores.append(score)
                 seen_topics.add(t_key)
 
-    threshold = np.percentile(all_scores, 85) if all_scores else 0
+    # pass 2: calculation of percentile threshold
+    percentile_threshold = np.percentile(all_scores, 90) if all_scores else 0
     final_payload = {cat: [] for cat in FEEDS.keys()}
-    total_count = 0
+    total_included = 0
 
     for cat, pool in category_pools.items():
         pool.sort(key=lambda x: x['score'], reverse=True)
+        
+        # apply the floor (first 8)
         final_payload[cat] = pool[:MIN_STORY_FLOOR]
-        for s in pool[MIN_STORY_FLOOR:]:
-            if s['score'] >= threshold and len(final_payload[cat]) < MAX_PER_SECTION and total_count < TOTAL_MAX:
-                final_payload[cat].append(s)
-        total_count += len(final_payload[cat])
+        
+        # top-off with percentile stories up to the max limit
+        for candidate in pool[MIN_STORY_FLOOR:]:
+            if candidate['score'] >= percentile_threshold and len(final_payload[cat]) < MAX_PER_SECTION:
+                if (total_included + len(final_payload[cat])) < TOTAL_MAX:
+                    final_payload[cat].append(candidate)
+        
+        total_included += len(final_payload[cat])
 
+    # compilation
     full_script, all_links = [], []
     for cat, stories in final_payload.items():
         script, links = await generate_segment(cat, stories, date_str)
@@ -131,8 +143,9 @@ async def main():
             with open(SEEN_FILE, "a") as f:
                 for s in stories: f.write(f"{s['hash']}\n")
 
-    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nGoodbye."
+    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n\n" + "\n\n".join(full_script) + "\n\nThat concludes today's briefing. Goodbye."
     
+    # audio production
     final_file = f"{file_date}_Orator.mp3"
     voice_file = "voice.wav"
     pipeline = KPipeline(lang_code='a') 
@@ -144,13 +157,14 @@ async def main():
     bg_music = "bg_music.mp3"; music_files = glob.glob("music/*.mp3")
     if music_files: bg_music = random.choice(music_files)
     
-    # MASTERING: 64k Mono is the "Golden Ratio" for 30-minute files on Discord
+    # mixing - removed the -t flag to prevent abrupt cutting
     if os.path.exists(bg_music):
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", "-ac", "1", "-ar", "44100", "-b:a", "64k", final_file], check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, "-filter_complex", "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first", final_file], check=True)
     else: 
-        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-ac", "1", "-ar", "44100", "-b:a", "64k", final_file], check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, final_file], check=True)
 
-    webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING**")
+    # delivery
+    webhook = DiscordWebhook(url=os.getenv("DISCORD_WEBHOOK_URL"), content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
     with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
     with open("sources.txt", "w") as f: f.write("\n".join(all_links))
     with open("sources.txt", "rb") as f: webhook.add_file(file=f.read(), filename="sources.txt")
