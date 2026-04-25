@@ -1,0 +1,65 @@
+{
+    "harsha": {
+        "webhook_env": "DISCORD_WEBHOOK_URL",
+        "discord_user_id_env": "DISCORD_USER_ID",
+        "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXc8kgYqQLKWv",
+        "feeds": {
+            "politics & markets": [
+                {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 18},
+                {"url": "https://apnews.com/hub/politics.rss", "weight": 19},
+                {"url": "https://prospect.org/api/rss/content.rss", "weight": 13},
+                {"url": "https://jacobin.com/feed", "weight": 13},
+                {"url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001054", "weight": 20},
+                {"url": "https://finance.yahoo.com/news/rssindex", "weight": 18},
+                {"url": "https://www.wsj.com/xml/rss/3_7014.xml", "weight": 15}
+            ],
+            "sports": [
+                {"url": "https://www.espn.com/espn/rss/nba/news", "weight": 20},
+                {"url": "https://bleacherreport.com/articles/feed?tag_id=14", "weight": 19},
+                {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "weight": 18},
+                {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 18},
+                {"url": "https://www.slamonline.com/feed/", "weight": 16},
+                {"url": "https://api.foxsports.com/v1/rss?partnerKey=zBa1u7En6Sjz9N8H&tag=nba", "weight": 15},
+                {"url": "https://texaslonghorns.com/rss?path=football", "weight": 10},
+                {"url": "https://texaslonghorns.com/rss?path=general", "weight": 9}
+            ],
+            "media & culture": [
+                {"url": "https://pitchfork.com/rss/news/", "weight": 20},
+                {"url": "https://www.thefader.com/feed", "weight": 19},
+                {"url": "https://www.stereogum.com/feed/", "weight": 18},
+                {"url": "https://hypebeast.com/music/feed", "weight": 17},
+                {"url": "https://www.serebii.net/index.rss", "weight": 10},
+                {"url": "https://www.crunchyroll.com/news/rss", "weight": 9},
+                {"url": "https://www.nintendolife.com/feeds/latest", "weight": 9},
+                {"url": "https://www.engadget.com/rss.xml", "weight": 12},
+                {"url": "https://arstechnica.com/feed/", "weight": 11},
+                {"url": "https://www.theverge.com/rss/index.xml", "weight": 10}
+            ]
+        },
+        "multipliers": {
+            "pokemon": 1.2, "serebii": 1.1, "shonen": 1.1, "luka": 2.5, "mavs": 2.3, 
+            "longhorns": 1.3, "iphone": 1.5, "rap": 2.0, "r&b": 2.0, "lakers": 1.5, 
+            "nba": 2.2, "zelda": 1.2, "mario": 1.2, "clairo": 2.2, "daniel caesar": 2.2, 
+            "drake": 2.0, "21 savage": 2.0, "frank ocean": 2.3, "economy": 1.9, "bitcoin": 1.5,
+            "fed": 1.7, "inflation": 1.8, "texas": 1.5
+        }
+    },
+    "brother": {
+        "webhook_env": "BROTHER_WEBHOOK_URL",
+        "discord_user_id_env": "BROTHER_DISCORD_ID",
+        "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DX4WYpdVIPJKT",
+        "feeds": {
+            "sports": [
+                {"url": "https://www.espn.com/espn/rss/nfl/news", "weight": 20},
+                {"url": "https://bleacherreport.com/articles/feed?tag_id=14", "weight": 18}
+            ],
+            "media": [
+                {"url": "https://www.crunchyroll.com/news/rss", "weight": 20},
+                {"url": "https://www.theverge.com/rss/index.xml", "weight": 15}
+            ]
+        },
+        "multipliers": {
+            "gaming": 2.0, "nfl": 2.5, "anime": 2.0, "marvel": 1.5
+        }
+    }
+}

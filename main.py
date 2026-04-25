@@ -1,377 +1,342 @@
-import os, asyncio, feedparser, datetime, hashlib, trafilatura, subprocess, random, glob, time
+import os, asyncio, feedparser, datetime, hashlib, trafilatura, subprocess, random, glob, time, json
 import numpy as np
 import edge_tts
 import chromadb
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+import yt_dlp
 from openai import AsyncOpenAI
 from discord_webhook import DiscordWebhook
 from dotenv import load_dotenv
 
 load_dotenv()
 
-FEEDS = {
-    "politics & markets": [
-        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 18},
-        {"url": "https://apnews.com/hub/politics.rss", "weight": 19},
-        {"url": "https://prospect.org/api/rss/content.rss", "weight": 13},
-        {"url": "https://jacobin.com/feed", "weight": 13},
-        {"url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001054", "weight": 20}, # CNBC Markets
-        {"url": "https://finance.yahoo.com/news/rssindex", "weight": 18}, # Yahoo Finance
-        {"url": "https://www.wsj.com/xml/rss/3_7014.xml", "weight": 15}, # WSJ Business
-    ],
-    "sports": [
-        {"url": "https://www.espn.com/espn/rss/nba/news", "weight": 20},
-        {"url": "https://bleacherreport.com/articles/feed?tag_id=14", "weight": 19}, # Bleacher Report NBA
-        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "weight": 18},
-        {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 18},
-        {"url": "https://www.slamonline.com/feed/", "weight": 16}, # SLAM Online
-        {"url": "https://api.foxsports.com/v1/rss?partnerKey=zBa1u7En6Sjz9N8H&tag=nba", "weight": 15},
-        {"url": "https://texaslonghorns.com/rss?path=football", "weight": 10},
-        {"url": "https://texaslonghorns.com/rss?path=general", "weight": 9},
-    ],
-    "media & culture": [
-        {"url": "https://pitchfork.com/rss/news/", "weight": 20}, # Indie/Alternative
-        {"url": "https://www.thefader.com/feed", "weight": 19}, # R&B, Rap, Indie
-        {"url": "https://www.stereogum.com/feed/", "weight": 18}, # Indie Music
-        {"url": "https://hypebeast.com/music/feed", "weight": 17}, # Hip-Hop/Rap
-        {"url": "https://www.serebii.net/index.rss", "weight": 10}, # Pokemon (reduced)
-        {"url": "https://www.crunchyroll.com/news/rss", "weight": 9}, # Anime (reduced)
-        {"url": "https://www.nintendolife.com/feeds/latest", "weight": 9},
-        {"url": "https://www.engadget.com/rss.xml", "weight": 12}, # Tech
-        {"url": "https://arstechnica.com/feed/", "weight": 11},
-        {"url": "https://www.theverge.com/rss/index.xml", "weight": 10},
-    ]
-}
-
-MULTIPLIERS = {
-    "pokemon": 1.2, "serebii": 1.1, "shonen": 1.1, "luka": 2.5, "mavs": 2.3, 
-    "longhorns": 1.3, "iphone": 1.5, "rap": 2.0, "r&b": 2.0, "lakers": 1.5, 
-    "nba": 2.2, "zelda": 1.2, "mario": 1.2, "clairo": 2.2, "daniel caesar": 2.2, 
-    "drake": 2.0, "21 savage": 2.0, "frank ocean": 2.3, "economy": 1.9, "bitcoin": 1.5,
-    "fed": 1.7, "inflation": 1.8, "texas": 1.5
-}
-
 MIN_STORY_FLOOR = 5 
 MAX_PER_SECTION = 8
 WORD_BUDGET = 2200
-
 SEEN_FILE = "seen_stories.txt"
+
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-DISCORD_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-def send_status(msg):
-    print(msg)
-    try:
-        webhook = DiscordWebhook(url=DISCORD_URL, content=f"**Status:** {msg}")
-        webhook.execute()
-    except: pass
-
-def get_topic_key(title):
-    words = [w for w in title.lower().split() if len(w) > 3]
-    return " ".join(words[:3])
-
-def init_chroma():
+# Initialize ChromaDB efficiently
+def get_chroma_db():
     chroma_client = chromadb.PersistentClient(path="./chroma_db")
-    collection = chroma_client.get_or_create_collection(name="news_memory")
-    return collection
+    return chroma_client.get_or_create_collection(name="orator_news_rag")
 
-async def producer(queue):
-    send_status("Producer: Spacing out concurrent RSS feed requests...")
-    
-    async def fetch_feed(cfg, cat):
-        try:
-            feed = await asyncio.to_thread(feedparser.parse, cfg['url'])
-            for i, e in enumerate(feed.entries[:16]):
-                await queue.put({"entry": e, "cat": cat, "cfg": cfg, "index": i})
-        except Exception as ex:
-            pass
+collection = get_chroma_db()
 
-    tasks = [fetch_feed(cfg, cat) for cat, configs in FEEDS.items() for cfg in configs]
-    await asyncio.gather(*tasks)
-    
-    # Send poison pills to consumers
-    for _ in range(10): 
-        await queue.put(None)
-
-async def consumer_worker(queue, category_pools, seen_hashes, seen_topics, collection, cst_now):
-    while True:
-        item = await queue.get()
-        if item is None:
-            queue.task_done()
-            break
-            
-        e, cat, cfg, i = item['entry'], item['cat'], item['cfg'], item['index']
-        
-        # Fast synchronous duplication rejection
-        title = e.title.lower() if hasattr(e, 'title') else ""
-        h = hashlib.md5(title.encode()).hexdigest()
-        if h in seen_hashes:
-            queue.task_done()
-            continue
-            
-        t_key = get_topic_key(title)
-        if t_key in seen_topics:
-            queue.task_done()
-            continue
-            
-        # Async extract full context
-        link = getattr(e, 'link', '')
-        summary = getattr(e, 'summary', '')
-        text = ""
-        try:
-            downloaded = await asyncio.to_thread(trafilatura.fetch_url, link)
-            text = await asyncio.to_thread(trafilatura.extract, downloaded) if downloaded else summary
-        except: text = summary
-        
-        if not text:
-            queue.task_done()
-            continue
-
-        # RAG Deduplication Logic
-        sim_score = 0.0
-        try:
-            # Query ChromaDB context limit: 72 hours logic
-            # Calculate distance of embedded text against history
-            res = await asyncio.to_thread(collection.query, query_texts=[text[:1000]], n_results=1)
-            if res['distances'] and len(res['distances'][0]) > 0:
-                dist = res['distances'][0][0]
-                # Map distance to similarity heavily avoiding identical matches
-                sim_score = max(0.0, 1.0 - float(dist))
-        except: pass
-            
-        # Algorithmic Scoring Component
-        base_score = float(cfg['weight'] * 50)
-        if i < 3: base_score *= 1.25
-        for kw, mult in MULTIPLIERS.items():
-            if kw in title: base_score *= mult
-            
-        # The Semantic Deduplication Hybrid
-        base_score = base_score * (1.0 - sim_score)
-        
-        # Recency Weighting Component
-        recency_score = 0
-        if hasattr(e, 'published_parsed') and e.published_parsed:
-            pub_dt = datetime.datetime.fromtimestamp(time.mktime(e.published_parsed), datetime.timezone.utc)
-            delta = cst_now - pub_dt
-            hours = delta.total_seconds() / 3600
-            if hours <= 4:
-                recency_score = 20
-            else:
-                recency_score = max(0, 5 - (hours * 0.1)) # decay factor
-                
-        final_score = base_score + recency_score
-        
-        # Append safe data
-        seen_topics.add(t_key)
-        category_pools[cat].append({
-            "score": final_score, 
-            "entry": e, 
-            "hash": h, 
-            "topic": t_key,
-            "text": text
-        })
-        queue.task_done()
-
-async def generate_segment(name, stories, date_str, current_word_count):
-    if not stories or current_word_count >= WORD_BUDGET: return "", []
-    send_status(f"Generating script for **{name.upper()}** ({len(stories)} stories allowed)...")
-    
-    payload, links = "", []
-    for item in stories:
-        e = item['entry']
-        text = item['text']
-        payload += f"STORY: {e.title}\nCONTEXT: {text[:2500]}\n\n"
-        links.append(f"[{name.upper()}] {e.title} - {e.link}")
-    
-    prompt = (f"You are Orator. Today is {date_str}. Write the {name} segment. "
-              f"STYLE: VERBOSE & GRANULAR. 2-3 short, highly factual paragraphs per story. Focus on data density. No abstract symbols. "
-              f"CRITICAL CONSTRAINT: You have a strict remaining budget of {WORD_BUDGET - current_word_count} words left to use. Be concise where necessary.")
-    
+# --- Utility Functions ---
+def robust_extract(url):
     try:
-        resp = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt + f"\n\nDATA:\n{payload}"}],
-            temperature=0.3
-        )
-        return resp.choices[0].message.content, links
-    except Exception as e:
-        print(f"API Error: {e}")
-        return "", []
-
-
-async def main():
-    cst_now = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
-    date_str, file_date = cst_now.strftime("%A, %B %d, %Y"), cst_now.strftime("%Y-%m-%d")
-    
-    send_status(f"Starting Orator v3.0 Pipeline for **{date_str}**")
-    
-    if not os.path.exists(SEEN_FILE): open(SEEN_FILE, 'w').close()
-    with open(SEEN_FILE, "r") as f: seen_hashes = set(line.strip() for line in f)
-
-    collection = init_chroma()
-    queue = asyncio.Queue(maxsize=1000)
-    seen_topics = set()
-    category_pools = {cat: [] for cat in FEEDS.keys()}
-
-    # Phase 2: Start Producer and multiple Consumers
-    send_status("Initializing Async Data Pipeline & RAG checks...")
-    workers = []
-    num_workers = 10
-    for _ in range(num_workers):
-        workers.append(asyncio.create_task(consumer_worker(queue, category_pools, seen_hashes, seen_topics, collection, cst_now)))
-    
-    await asyncio.gather(producer(queue))
-    await asyncio.gather(*workers) # wait for queue to process payload
-
-    # Ranking logic
-    all_scores = [item['score'] for cat in category_pools.values() for item in cat]
-    threshold = np.percentile(all_scores, 90) if all_scores else 0
-    final_payload = {cat: [] for cat in FEEDS.keys()}
-
-    for cat, pool in category_pools.items():
-        pool.sort(key=lambda x: x['score'], reverse=True)
-        final_payload[cat] = pool[:MIN_STORY_FLOOR]
-        for s in pool[MIN_STORY_FLOOR:]:
-            if s['score'] >= threshold and len(final_payload[cat]) < MAX_PER_SECTION:
-                final_payload[cat].append(s)
-
-    # Phase 3: Segment Generation with strict Word tracking
-    full_script, all_links, full_story_objects = [], [], []
-    current_words = 0
-    
-    for cat, stories in final_payload.items():
-        if current_words >= WORD_BUDGET:
-            break
-            
-        script, links = await generate_segment(cat, stories, date_str, current_words)
-        if script:
-            words_in_script = len(script.split())
-            if current_words + words_in_script > WORD_BUDGET:
-                # Force chunk script at nearest sentence to stay under budget
-                cutoff = WORD_BUDGET - current_words
-                sentences = script.split('.')
-                trimmed_script = ""
-                for sent in sentences:
-                    if len(trimmed_script.split()) + len(sent.split()) > cutoff:
-                        break
-                    trimmed_script += sent + "."
-                script = trimmed_script.strip()
-                words_in_script = len(script.split())
-                
-            current_words += words_in_script
-            full_script.append(script)
-            all_links.extend(links)
-            full_story_objects.extend(stories)
-
-    if not full_script:
-        send_status("Pipeline yielded nothing.")
-        return
-
-    # Ingest winning stories to ChromaDB for 72 hour permanence
-    send_status(f"Ingesting {len(full_story_objects)} featured stories into ChromaDB...")
-    docs, metas, ids = [], [], []
-    for item in full_story_objects:
-        text, h = item['text'], item['hash']
-        docs.append(text[:1000])
-        metas.append({"timestamp": cst_now.timestamp()})
-        ids.append(h)
-    
-    if docs:
-        collection.add(documents=docs, metadatas=metas, ids=ids)
-        
-    # Prune ChromaDB (72 hour memory window)
-    cutoff_time = cst_now.timestamp() - (72 * 3600)
-    try:
-        old_records = collection.get(where={"timestamp": {"$lt": cutoff_time}})
-        if old_records and old_records['ids']:
-            collection.delete(ids=old_records['ids'])
+        downloaded = trafilatura.fetch_url(url)
+        if downloaded:
+            text = trafilatura.extract(downloaded)
+            if text and len(text) > 100: return text
     except: pass
-    
-    # Save standard file cache
-    with open(SEEN_FILE, "a") as f:
-        for s in full_story_objects: f.write(f"{s['hash']}\n")
+    return None
 
-    # Phase 4: Construct output using Voice 
-    full_text = f"Hello, I'm Orator, and this is your daily briefing for {date_str}.\n" + "\n\n".join(full_script) + "\n\nGoodbye."
-    send_status(f"Generated text ({current_words} words). Initializing Edge-TTS Audio Generation...")
+def get_cosine_similarity(text1, text2):
+    vec1 = np.array([sum(ord(c) for c in text1)]) 
+    vec2 = np.array([sum(ord(c) for c in text2)]) 
+    num = np.dot(vec1, vec2)
+    denom = np.linalg.norm(vec1) * np.linalg.norm(vec2)
+    if denom == 0: return 0.0
+    return float(num / denom)
+
+def calculate_hybrid_score(text, raw_weight, user_multipliers):
+    text_lower = text.lower()
+    score = raw_weight
+    for kw, mult in user_multipliers.items():
+        if kw in text_lower: score *= mult
     
-    final_file = f"{file_date}_Orator.mp3"
-    voice_file = "voice.mp3"
+    # RAG memory check (last 72 hours)
+    cutoff = time.time() - (72 * 3600)
+    chroma_results = collection.query(
+        query_texts=[text[:500]],
+        n_results=1,
+        where={"timestamp": {"$gt": cutoff}}
+    )
     
-    communicate = edge_tts.Communicate(full_text, 'en-US-BrianNeural') # Swapped to Brian (more human, less corporate)
-    await communicate.save(voice_file)
+    dup_penalty = 1.0
+    if chroma_results and chroma_results['documents'] and chroma_results['documents'][0]:
+        past_doc = chroma_results['documents'][0][0]
+        sim = get_cosine_similarity(text[:1000], past_doc[:1000])
+        if sim > 0.85: dup_penalty = 0.1 # Heavily penalize
+    
+    return score * dup_penalty
+
+# --- Async Fetching Pipeline ---
+async def producer(url, q, url_to_weight_dict):
+    def fetch(): return feedparser.parse(url)
+    try:
+        feed = await asyncio.to_thread(fetch)
+        for entry in feed.entries:
+            link = entry.get("link", "")
+            if not link: continue
+            
+            # Identify which categories this URL maps to in the massive dict
+            categories = url_to_weight_dict.get(url, [])
+            if not categories: continue
+            
+            await q.put((entry, categories))
+    except Exception as e:
+        print(f"Error fetching {url}: {e}")
+
+async def consumer_worker(q, raw_entries_list):
+    while True:
+        try:
+            item = await q.get()
+            entry, categories = item
+            link = entry.get("link")
+            hsh = hashlib.md5(link.encode()).hexdigest()
+            
+            text = entry.get("summary", "")
+            if len(text) < 150: text = await asyncio.to_thread(robust_extract, link) or text
+            if len(text) < 100:
+                q.task_done()
+                continue
+            
+            raw_entries_list.append({
+                "hash": hsh,
+                "title": entry.get("title", ""),
+                "link": link,
+                "text": text,
+                "categories": categories # e.g. [{"category_name": "sports", "weight": 20}]
+            })
+            q.task_done()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            q.task_done()
+
+def generate_background_music(playlist_url):
+    cid = os.getenv("SPOTIPY_CLIENT_ID")
+    secret = os.getenv("SPOTIPY_CLIENT_SECRET")
     
     bg_music = "bg_music.mp3"; music_files = glob.glob("music/*.mp3")
-    if music_files: bg_music = random.choice(music_files)
+    local_fallback = random.choice(music_files) if music_files else None
     
-    # Simple direct 128kbps stereo ffmpeg command
-    send_status("Mastering final MP3 tracking to 128kbps...")
-    if os.path.exists(bg_music):
+    if not playlist_url or not cid or not secret:
+        return local_fallback
+        
+    try:
+        sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=cid, client_secret=secret))
+        results = sp.playlist_tracks(playlist_url)
+        tracks = results['items']
+        if not tracks: return local_fallback
+        
+        tr = random.choice(tracks)['track']
+        query = f"{tr['name']} {tr['artists'][0]['name']} audio"
+        
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'temp_bg_music',
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}],
+            'quiet': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"ytsearch1:{query}"])
+            
+        return "temp_bg_music.mp3"
+    except Exception as e:
+        print(f"Spotify/YtDLP failure: {e}")
+        return local_fallback
+
+# --- Main Logic ---
+async def process_user(user_name, user_config, scraped_articles, seen):
+    print(f"\n--- Processing User: {user_name} ---")
+    
+    webhook_url = os.getenv(user_config.get("webhook_env", ""), "")
+    if not webhook_url:
+        print(f"WARNING: No valid webhook provided for {user_name}, skipping.")
+        return seen
+        
+    discord_id = os.getenv(user_config.get("discord_user_id_env", ""), "User")
+    playlist_url = user_config.get("spotify_playlist_url", "")
+    feeds_conf = user_config.get("feeds", {})
+    mult_conf = user_config.get("multipliers", {})
+
+    # Score articles per user
+    user_inventory = {cat: [] for cat in feeds_conf.keys()}
+    
+    # Pre-compute valid URLs for this user to save time
+    valid_urls_for_user = set()
+    for cat, items in feeds_conf.items():
+        for i in items: valid_urls_for_user.add(i["url"])
+
+    for art in scraped_articles:
+        if art["hash"] in seen: continue
+        
+        # Check if the article's source is monitored by this user
+        matched_categories = []
+        for cdata in art["categories"]:
+            if cdata["url"] in valid_urls_for_user:
+                # Find which category this URL belongs to in the UX
+                for ux_cat, ux_items in feeds_conf.items():
+                    if any(x["url"] == cdata["url"] for x in ux_items):
+                        matched_categories.append({"cat": ux_cat, "weight": cdata["weight"]})
+
+        if not matched_categories: continue
+        
+        # We process the first matched category for simplicity
+        best_cat = matched_categories[0]["cat"]
+        score = calculate_hybrid_score(art["text"][:1500], matched_categories[0]["weight"], mult_conf)
+        
+        if score > 0:
+            user_inventory[best_cat].append({
+                "title": art["title"], "text": art["text"], "link": art["link"],
+                "score": score, "hash": art["hash"]
+            })
+
+    # Top selections
+    all_selected, segments = [], {}
+    for cat in user_inventory:
+        sorted_arts = sorted(user_inventory[cat], key=lambda x: x["score"], reverse=True)
+        top = sorted_arts[:MAX_PER_SECTION]
+        if len(top) >= MIN_STORY_FLOOR:
+            segments[cat] = top
+            all_selected.extend(top)
+
+    if not all_selected:
+        print(f"Not enough news for {user_name} today.")
+        return seen
+
+    print(f"[{user_name}] Generated {len(all_selected)} featured stories.")
+
+    # LLM Script Gen
+    file_date = datetime.datetime.now().strftime("%B %d, %Y")
+    system_prompt = "You are Orator, an expert podcast host. Write an engaging, smooth narrative script reading the news. Output ONLY the words to be spoken. Do not use sound effect brackets. Speak naturally. Bridge topics smoothly."
+    
+    current_words = 0
+    full_script = ""
+    for cat, stories in segments.items():
+        rem = WORD_BUDGET - current_words
+        if rem < 200: break
+        
+        prompt = f"Write the {cat} segment using these stories. Aim for ~{(rem//len(segments))} words.\n\n"
+        for s in stories: prompt += f"TITLE: {s['title']}\nCONTENT: {s['text'][:500]}\n\n"
+        
+        resp = await client.chat.completions.create(model="gpt-4o-mini", messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ], temperature=0.7)
+        chunk = resp.choices[0].message.content.strip()
+        full_script += "\n\n" + chunk
+        current_words += len(chunk.split())
+
+    # RAG Ingestion
+    for s in all_selected:
+        try:
+            collection.add(
+                documents=[s["text"][:1000]], metadatas=[{"timestamp": time.time()}], ids=[s["hash"]]
+            )
+            seen.add(s["hash"])
+        except: pass
+
+    # TTS & Mastering
+    voice_file = f"voice_{user_name}.mp3"
+    final_file = f"{file_date}_{user_name}_Orator.mp3"
+    
+    print(f"[{user_name}] Generating TTS (BrianNeural)...")
+    await edge_tts.Communicate(full_script, 'en-US-BrianNeural').save(voice_file)
+    
+    bg_music = generate_background_music(playlist_url)
+    
+    print(f"[{user_name}] Mastering tracks...")
+    if bg_music and os.path.exists(bg_music):
         cmd = [
             "ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, 
             "-filter_complex", 
-            "[0:a]aresample=44100[v];" # Removed artificial stereo panning which causes phasing artifacts
+            "[0:a]aresample=44100[v];"
             "[1:a]aresample=44100,volume=0.06[bg];"
             "[v][bg]amix=inputs=2:duration=first[out]",
             "-map", "[out]", "-ar", "44100", "-b:a", "128k", final_file
         ]
+        subprocess.run(cmd, check=True)
     else:
-        cmd = ["ffmpeg", "-y", "-i", voice_file, "-ar", "44100", "-b:a", "128k", final_file]
-        
-    subprocess.run(cmd, check=True)
-    
-    fsize_mb = os.path.getsize(final_file) / (1024 * 1024)
-    if fsize_mb > 24.5:
-        send_status(f"CRITICAL: Final mastered file exceeded limits ({fsize_mb:.2f} MB). Aborting delivery.")
-        return
+        subprocess.run(["ffmpeg", "-y", "-i", voice_file, "-ar", "44100", "-b:a", "128k", final_file], check=True)
 
-    # Final Delivery attempt 1
-    send_status(f"Uploading briefing ({fsize_mb:.2f} MB) to Litterbox (72-hour ephemeral host)...")
+    # Delivery
+    fsize_mb = os.path.getsize(final_file) / (1024 * 1024)
+    print(f"[{user_name}] Uploading {fsize_mb:.2f} MB to Litterbox...")
     
-    with open("sources.txt", "w") as f: f.write("\n".join(all_links))
+    sources = "sources.txt"
+    with open(sources, "w") as f: f.write("\n".join(s["link"] for s in all_selected))
     
-    def deliver_payload_via_litterbox(file_path):
+    def deliver_payload_via_litterbox(fp):
         import requests
         try:
             resp_link = requests.post(
-                "https://litterbox.catbox.moe/resources/internals/api.php",
-                data={"reqtype": "fileupload", "time": "72h"},
-                files={"fileToUpload": open(file_path, "rb")}
+                "https://litterbox.catbox.moe/resources/internals/api.php", data={"reqtype": "fileupload", "time": "72h"}, files={"fileToUpload": open(fp, "rb")}
             )
-            audio_url = resp_link.text
-            wh = DiscordWebhook(
-                url=DISCORD_URL, 
-                content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**\n\n🎙️ Listen to today's broadcast (Link expires in 72 Hours):\n{audio_url}"
-            )
-            with open("sources.txt", "rb") as f: wh.add_file(file=f.read(), filename="sources.txt")
+            wh = DiscordWebhook(url=webhook_url, content=f"**{file_date} - ORATOR BRIEFING FOR <@{discord_id}>**\n\n🎙️ Listen (Expires 72h):\n{resp_link.text}")
+            with open(sources, "rb") as fs: wh.add_file(file=fs.read(), filename="sources.txt")
             return wh.execute()
-        except Exception as e:
-            send_status(f"Litterbox upload error: {e}")
-            return None
-
-    def deliver_payload_direct(file_path):
-        wh = DiscordWebhook(url=DISCORD_URL, content=f"**{file_date} - ORATOR FALLBACK**")
-        with open(file_path, "rb") as f: wh.add_file(file=f.read(), filename=file_path)
+        except: return None
+        
+    def deliver_payload_direct(fp):
+        wh = DiscordWebhook(url=webhook_url, content=f"**{file_date} - ORATOR FALLBACK**")
+        with open(fp, "rb") as f2: wh.add_file(file=f2.read(), filename=fp)
         return wh.execute()
 
     resp = deliver_payload_via_litterbox(final_file)
-    
     if resp and resp.status_code == 200:
-        send_status("Litterbox briefing delivered successfully.")
+        print(f"[{user_name}] Delivered successfully.")
     else:
-        err_out = resp.text if resp else "Failed connection"
-        send_status(f"Litterbox delivery hit an error ({err_out}). Falling back to Discord 64kbps direct upload...")
-        
-        fallback_file = "fallback_" + final_file
-        subprocess.run(["ffmpeg", "-y", "-i", final_file, "-b:a", "64k", fallback_file], check=True)
-        resp2 = deliver_payload_direct(fallback_file)
-        if resp2.status_code == 200:
-            send_status("Fallback 64kbps briefing delivered successfully.")
-        else:
-            send_status(f"CRITICAL: Fallback Discord upload failed with {resp2.status_code}: {resp2.text}")
-        
-    send_status("Cleaning up.")
-    for f in [voice_file, final_file, "sources.txt"]: 
+        print(f"[{user_name}] Falling back to Discord direct upload.")
+        fb_file = "fb_" + final_file
+        subprocess.run(["ffmpeg", "-y", "-i", final_file, "-b:a", "64k", fb_file], check=True)
+        deliver_payload_direct(fb_file)
+        if os.path.exists(fb_file): os.remove(fb_file)
+
+    for f in [voice_file, final_file, sources]:
         if os.path.exists(f): os.remove(f)
+    if bg_music and bg_music.startswith("temp_bg_music") and os.path.exists(bg_music):
+        os.remove(bg_music)
+
+    return seen
+
+async def main():
+    print("Status: Starting Orator v4.0 Multi-User Pipeline")
+    
+    with open("users.json", "r") as f:
+        USERS = json.load(f)
+        
+    seen = set()
+    if os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, "r") as f: seen = set(line.strip() for line in f)
+
+    # 1. Map all global urls to avoid duplicate scraping
+    global_url_params = {}
+    for user, info in USERS.items():
+        for cat, feeds in info.get("feeds", {}).items():
+            for fd in feeds:
+                u = fd["url"]
+                if u not in global_url_params: global_url_params[u] = []
+                # attach raw weight for initial passing
+                global_url_params[u].append({"category": cat, "weight": fd["weight"], "url": u})
+
+    q = asyncio.Queue()
+    raw_entries = []
+    consumers = [asyncio.create_task(consumer_worker(q, raw_entries)) for _ in range(12)]
+    
+    print(f"Global Scraper initialized over {len(global_url_params)} unique endpoints...")
+    producers = [asyncio.create_task(producer(u, q, global_url_params)) for u in global_url_params]
+    
+    await asyncio.gather(*producers)
+    await q.join()
+    for c in consumers: c.cancel()
+    
+    print(f"Scraped and extracted {len(raw_entries)} master articles.")
+
+    # 2. Sequential User Build Loop
+    for user, config in USERS.items():
+        seen = await process_user(user, config, raw_entries, seen)
+
+    with open(SEEN_FILE, "w") as f:
+        f.write("\n".join(list(seen)[-300:])) # Purge memory to last 300 to keep it clean
+
+    print("Pipeline finished successfully.")
 
 if __name__ == "__main__":
     asyncio.run(main())
