@@ -9,47 +9,44 @@ from dotenv import load_dotenv
 load_dotenv()
 
 FEEDS = {
-    "politics": [
-        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 18},
-        {"url": "https://apnews.com/hub/politics.rss", "weight": 20},
-        {"url": "https://www.reutersagency.com/feed/?best-topics=political-news&post_type=best", "weight": 18},
-        {"url": "https://thehill.com/homenews/feed/", "weight": 15},
-        {"url": "https://prospect.org/api/rss/content.rss", "weight": 13},
-        {"url": "https://jacobin.com/feed", "weight": 13},
-        {"url": "https://gao.gov/blog/feed", "weight": 11},
+    "world & markets": [
+        {"url": "https://apnews.com/hub/politics.rss", "weight": 14},
+        {"url": "https://www.reutersagency.com/feed/?best-topics=political-news&post_type=best", "weight": 14},
+        {"url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001054", "weight": 20}, # CNBC Markets
+        {"url": "https://finance.yahoo.com/news/rssindex", "weight": 18}, # Yahoo Finance
+        {"url": "https://www.wsj.com/xml/rss/3_7014.xml", "weight": 18}, # WSJ Business
+        {"url": "https://thehill.com/homenews/feed/", "weight": 10},
     ],
     "sports": [
-        {"url": "https://www.espn.com/espn/rss/nba/news", "weight": 18},
-        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "weight": 16},
-        {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 15},
-        {"url": "https://www.cbssports.com/xml/rss/itnba.xml", "weight": 15},
+        {"url": "https://www.espn.com/espn/rss/nba/news", "weight": 20},
+        {"url": "https://bleacherreport.com/articles/feed?tag_id=14", "weight": 19}, # Bleacher Report NBA
+        {"url": "https://basketball.realgm.com/rss/wiretap/0/0.xml", "weight": 18},
+        {"url": "https://feeds.hoopshype.com/xml/rumors.xml", "weight": 18},
+        {"url": "https://www.slamonline.com/feed/", "weight": 16}, # SLAM Online
         {"url": "https://api.foxsports.com/v1/rss?partnerKey=zBa1u7En6Sjz9N8H&tag=nba", "weight": 15},
-        {"url": "https://texaslonghorns.com/rss?path=football", "weight": 14},
-        {"url": "https://texaslonghorns.com/rss?path=general", "weight": 12},
-        {"url": "https://thedailytexan.com/category/sports/feed/", "weight": 8},
+        {"url": "https://texaslonghorns.com/rss?path=football", "weight": 10},
+        {"url": "https://texaslonghorns.com/rss?path=general", "weight": 9},
     ],
-    "media": [
-        {"url": "https://www.serebii.net/index.rss", "weight": 17},
-        {"url": "https://www.crunchyroll.com/news/rss", "weight": 15},
-        {"url": "https://pitchfork.com/rss/news/", "weight": 14},
-        {"url": "https://anitrendz.net/news/feed", "weight": 12},
-        {"url": "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us", "weight": 12},
-        {"url": "https://www.nintendolife.com/feeds/latest", "weight": 12},
-        {"url": "https://aws.amazon.com/blogs/aws/feed/", "weight": 12},
-        {"url": "https://hypebeast.com/music/feed", "weight": 10},
-        {"url": "https://www.engadget.com/rss.xml", "weight": 9},
-        {"url": "https://www.wired.com/feed/category/gear/latest/rss", "weight": 9},
-        {"url": "https://arstechnica.com/feed/", "weight": 9},
-        {"url": "https://corp.ign.com/feeds/news", "weight": 9},
-        {"url": "https://www.theverge.com/rss/index.xml", "weight": 7},
+    "media & culture": [
+        {"url": "https://pitchfork.com/rss/news/", "weight": 20}, # Indie/Alternative
+        {"url": "https://www.thefader.com/feed", "weight": 19}, # R&B, Rap, Indie
+        {"url": "https://www.stereogum.com/feed/", "weight": 18}, # Indie Music
+        {"url": "https://hypebeast.com/music/feed", "weight": 17}, # Hip-Hop/Rap
+        {"url": "https://www.serebii.net/index.rss", "weight": 10}, # Pokemon (reduced)
+        {"url": "https://www.crunchyroll.com/news/rss", "weight": 9}, # Anime (reduced)
+        {"url": "https://www.nintendolife.com/feeds/latest", "weight": 9},
+        {"url": "https://www.engadget.com/rss.xml", "weight": 12}, # Tech
+        {"url": "https://arstechnica.com/feed/", "weight": 11},
+        {"url": "https://www.theverge.com/rss/index.xml", "weight": 10},
     ]
 }
 
 MULTIPLIERS = {
-    "pokemon": 2.0, "serebii": 1.9, "shonen": 1.5, "luka": 2.0, "mavs": 1.8, 
-    "longhorns": 1.7, "iphone": 1.5, "rap": 1.4, "r&b": 1.6, "lakers": 1.3, 
-    "nba": 1.6, "zelda": 1.9, "mario": 1.6, "clairo": 1.8, "daniel caesar": 1.8, 
-    "drake": 1.7, "21 savage": 1.7, "jojo's": 1.8, "economy": 1.4, "texas": 1.5
+    "pokemon": 1.2, "serebii": 1.1, "shonen": 1.1, "luka": 2.5, "mavs": 2.3, 
+    "longhorns": 1.3, "iphone": 1.5, "rap": 2.0, "r&b": 2.0, "lakers": 1.5, 
+    "nba": 2.2, "zelda": 1.2, "mario": 1.2, "clairo": 2.2, "daniel caesar": 2.2, 
+    "drake": 2.0, "21 savage": 2.0, "frank ocean": 2.3, "economy": 1.9, "bitcoin": 1.5,
+    "fed": 1.7, "inflation": 1.8, "texas": 1.5
 }
 
 MIN_STORY_FLOOR = 5 
