@@ -28,10 +28,11 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: python main.py
-      - name: Commit seen stories
+      - name: Commit data persistence
         run: |
           git config --global user.name 'News Bot'
           git config --global user.email 'bot@actions.com'
           git add seen_stories.txt
-          git commit -m "Update seen stories [skip ci]" || echo "No changes to commit"
+          git add chroma_db/ || echo "no chroma_db found"
+          git commit -m "Update memory persistence [skip ci]" || echo "No changes to commit"
           git push || echo "Nothing to push"
