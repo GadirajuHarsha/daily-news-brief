@@ -9,13 +9,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 FEEDS = {
-    "world & markets": [
-        {"url": "https://apnews.com/hub/politics.rss", "weight": 14},
-        {"url": "https://www.reutersagency.com/feed/?best-topics=political-news&post_type=best", "weight": 14},
+    "politics & markets": [
+        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "weight": 18},
+        {"url": "https://apnews.com/hub/politics.rss", "weight": 19},
+        {"url": "https://prospect.org/api/rss/content.rss", "weight": 13},
+        {"url": "https://jacobin.com/feed", "weight": 13},
         {"url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001054", "weight": 20}, # CNBC Markets
         {"url": "https://finance.yahoo.com/news/rssindex", "weight": 18}, # Yahoo Finance
-        {"url": "https://www.wsj.com/xml/rss/3_7014.xml", "weight": 18}, # WSJ Business
-        {"url": "https://thehill.com/homenews/feed/", "weight": 10},
+        {"url": "https://www.wsj.com/xml/rss/3_7014.xml", "weight": 15}, # WSJ Business
     ],
     "sports": [
         {"url": "https://www.espn.com/espn/rss/nba/news", "weight": 20},
@@ -296,7 +297,7 @@ async def main():
     final_file = f"{file_date}_Orator.mp3"
     voice_file = "voice.mp3"
     
-    communicate = edge_tts.Communicate(full_text, 'en-US-ChristopherNeural', rate="+10%")
+    communicate = edge_tts.Communicate(full_text, 'en-US-BrianNeural') # Swapped to Brian (more human, less corporate)
     await communicate.save(voice_file)
     
     bg_music = "bg_music.mp3"; music_files = glob.glob("music/*.mp3")
@@ -308,8 +309,8 @@ async def main():
         cmd = [
             "ffmpeg", "-y", "-i", voice_file, "-stream_loop", "-1", "-i", bg_music, 
             "-filter_complex", 
-            "[0:a]aresample=44100,pan=stereo|c0=c0|c1=c0[v];" 
-            "[1:a]aresample=44100,volume=0.08[bg];"
+            "[0:a]aresample=44100[v];" # Removed artificial stereo panning which causes phasing artifacts
+            "[1:a]aresample=44100,volume=0.06[bg];"
             "[v][bg]amix=inputs=2:duration=first[out]",
             "-map", "[out]", "-ar", "44100", "-b:a", "128k", final_file
         ]
