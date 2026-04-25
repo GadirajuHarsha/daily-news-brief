@@ -326,15 +326,34 @@ async def main():
         send_status(f"CRITICAL: Final mastered file exceeded limits ({fsize_mb:.2f} MB). Aborting delivery.")
         return
 
-    # Final Delivery
+    # Final Delivery attempt 1
     send_status(f"Uploading briefing ({fsize_mb:.2f} MB) to Discord...")
-    webhook = DiscordWebhook(url=DISCORD_URL, content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
-    with open(final_file, "rb") as f: webhook.add_file(file=f.read(), filename=final_file)
-    with open("sources.txt", "w") as f: f.write("\n".join(all_links))
-    with open("sources.txt", "rb") as f: webhook.add_file(file=f.read(), filename="sources.txt")
-    webhook.execute()
     
-    send_status("Briefing delivered successfully. Cleaning up.")
+    with open("sources.txt", "w") as f: f.write("\n".join(all_links))
+    
+    def deliver_payload(file_path):
+        wh = DiscordWebhook(url=DISCORD_URL, content=f"**{file_date} - ORATOR BRIEFING FOR <@{os.getenv('DISCORD_USER_ID')}>**")
+        with open(file_path, "rb") as f: wh.add_file(file=f.read(), filename=file_path)
+        with open("sources.txt", "rb") as f: wh.add_file(file=f.read(), filename="sources.txt")
+        return wh.execute()
+        
+    resp = deliver_payload(final_file)
+    
+    if resp.status_code in [413, 400]:
+        send_status(f"Discord rejected the file (Code {resp.status_code}). Reason: {resp.text}. Falling back to 64kbps ultra-compression...")
+        fallback_file = "fallback_" + final_file
+        subprocess.run(["ffmpeg", "-y", "-i", final_file, "-b:a", "64k", fallback_file], check=True)
+        resp2 = deliver_payload(fallback_file)
+        if resp2.status_code == 200:
+            send_status("Fallback 64kbps briefing delivered successfully.")
+        else:
+            send_status(f"CRITICAL: Fallback failed with {resp2.status_code}: {resp2.text}")
+    elif resp.status_code != 200:
+        send_status(f"Webhook Error {resp.status_code}: {resp.text}")
+    else:
+        send_status("Briefing delivered successfully.")
+        
+    send_status("Cleaning up.")
     for f in [voice_file, final_file, "sources.txt"]: 
         if os.path.exists(f): os.remove(f)
 
