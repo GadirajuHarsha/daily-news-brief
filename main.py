@@ -254,34 +254,53 @@ async def on_ready():
         daily_brief_timer.start()
 
 @bot.command()
-async def tune(ctx, target_user: str, keyword: str, weight: float):
+async def tune(ctx, keyword: str, weight: float):
+    user_id = str(ctx.author.id)
     try:
         with open("users.json", "r") as f: users_data = json.load(f)
-        if target_user not in users_data:
-            await ctx.send(f"Error: User `{target_user}` not found in the Orator database.")
+        if user_id not in users_data:
+            await ctx.send("Error: You are not registered in the database. Use `!onboard <webhook>` first.")
             return
-        users_data[target_user]["multipliers"][keyword.lower()] = weight
+        users_data[user_id]["multipliers"][keyword.lower()] = weight
         with open("users.json", "w") as f: json.dump(users_data, f, indent=4)
-        await ctx.send(f"✅ Successfully tuned `{target_user}`: Algorithm multiplier for `{keyword}` mathematically set to `{weight}`x.")
+        await ctx.send(f"✅ Successfully tuned your platform: Algorithm multiplier for `{keyword}` mathematically set to `{weight}`x.")
     except Exception as e:
         await ctx.send(f"Fatal error adjusting parameters: {e}")
 
 @bot.command()
-async def onboard(ctx, username: str, webhook: str):
+async def onboard(ctx, webhook: str):
+    user_id = str(ctx.author.id)
     try:
-        with open("users.json", "r") as f: users = json.load(f)
-        if username in users:
-            await ctx.send(f"User {username} already exists.")
+        try:
+            with open("users.json", "r") as f: users = json.load(f)
+        except:
+            users = {}
+            
+        if user_id in users:
+            await ctx.send(f"Your configuration already exists! Use `!tune <topic> <weight>` to edit your profile.")
             return
             
-        users[username] = {
-            "webhook_url_raw": webhook, "discord_user_id_raw": "User", "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXc8kgYqQLKWv",
+        users[user_id] = {
+            "webhook_url_raw": webhook, "discord_user_id_raw": user_id, "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXc8kgYqQLKWv",
             "feeds": { "world": [{"url": "https://apnews.com/hub/politics.rss", "weight": 15}] },
             "multipliers": { "technology": 1.5 }
         }
         with open("users.json", "w") as f: json.dump(users, f, indent=4)
-        await ctx.send(f"🎉 Bootstrapped `{username}` dynamically into the Orator grid! Use `!tune` to add properties.")
-    except Exception as e: await ctx.send(f"Failure initializing node: {e}")
+        await ctx.send(f"🎉 Bootstrapped securely into the Orator grid! You completely govern your own state. Use `!tune <category> <weight>` to add properties or `!set_spotify <url>` to change music.")
+    except Exception as e: await ctx.send(f"Failure initializing local node: {e}")
+
+@bot.command()
+async def set_spotify(ctx, spotify_url: str):
+    user_id = str(ctx.author.id)
+    try:
+        with open("users.json", "r") as f: users = json.load(f)
+        if user_id not in users:
+            await ctx.send("Please `!onboard` yourself first.")
+            return
+        users[user_id]["spotify_playlist_url"] = spotify_url
+        with open("users.json", "w") as f: json.dump(users, f, indent=4)
+        await ctx.send("✅ Customized your podcast background music stream.")
+    except Exception as e: await ctx.send("Error modifying music schema.")
 
 @bot.command()
 async def force_briefing(ctx):
