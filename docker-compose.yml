@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  orator:
+    build: .
+    container_name: orator_v4
+    restart: always # Keep it alive 24/7 and resilient to crashes
+    env_file:
+      - .env
+    environment:
+      - DAEMON=true
+    volumes:
+      # Memory persistence: bind local files inside container
+      - ./users.json:/app/users.json
+      - ./chroma_db:/app/chroma_db
+      - ./seen_stories.txt:/app/seen_stories.txt
+    timezone: America/New_York # Set your friend's local timezone here

@@ -146,12 +146,12 @@ def generate_background_music(playlist_url):
 async def process_user(user_name, user_config, scraped_articles, seen):
     print(f"\n--- Processing User: {user_name} ---")
     
-    webhook_url = os.getenv(user_config.get("webhook_env", ""), "")
+    webhook_url = user_config.get("webhook_url_raw") or os.getenv(user_config.get("webhook_env", ""), "")
     if not webhook_url:
         print(f"WARNING: No valid webhook provided for {user_name}, skipping.")
         return seen
         
-    discord_id = os.getenv(user_config.get("discord_user_id_env", ""), "User")
+    discord_id = user_config.get("discord_user_id_raw") or os.getenv(user_config.get("discord_user_id_env", ""), "User")
     playlist_url = user_config.get("spotify_playlist_url", "")
     feeds_conf = user_config.get("feeds", {})
     mult_conf = user_config.get("multipliers", {})
@@ -339,4 +339,20 @@ async def main():
     print("Pipeline finished successfully.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    def run_pipeline():
+        asyncio.run(main())
+        
+    if os.getenv("DAEMON", "false").lower() == "true":
+        import schedule
+        print("Orator v4 Daemon Layer Started. Waiting for 08:00 AM to generate briefings...")
+        schedule.every().day.at("08:00").do(run_pipeline)
+        
+        # Initial run if desired, disabled to strictly follow chron normally
+        # run_pipeline()
+        
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+    else:
+        # Standard Github Actions immediate execution logic
+        run_pipeline()
