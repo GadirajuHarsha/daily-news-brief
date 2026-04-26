@@ -2,16 +2,24 @@ version: '3.8'
 
 services:
   orator:
-    build: .
-    container_name: orator_v4
+    image: ghcr.io/gadirajuharsha/daily-news-brief:latest
+    container_name: orator_v5_bot
     restart: always # Keep it alive 24/7 and resilient to crashes
     env_file:
       - .env
-    environment:
-      - DAEMON=true
     volumes:
       # Memory persistence: bind local files inside container
       - ./users.json:/app/users.json
       - ./chroma_db:/app/chroma_db
       - ./seen_stories.txt:/app/seen_stories.txt
     timezone: America/New_York # Set your friend's local timezone here
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Un-comment the line below if the repo is strictly private and friend needs auth:
+      # - ~/.docker/config.json:/config.json 
+    command: --interval 60 orator_v5_bot # Check Github every 60 seconds for 0-SSH syncing
+    restart: always

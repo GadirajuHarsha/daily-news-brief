@@ -12,4 +12,4 @@ chromadb
 yt-dlp
 spotipy
 requests
-schedule
+discord.py
