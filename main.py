@@ -123,7 +123,7 @@ async def process_user(bot, user_name, user_config, scraped_articles, seen):
 
     if bot and ch:
         await ch.send(content="**🎙️ Your Daily Briefing is Here.**\nSources:\n" + "\n".join(s["link"][:80]+"..." for s in all_selected[:5]), file=discord.File(fn))
-    elif (wh := user_config.get("webhook_url_raw")):
+    elif (wh := os.getenv(user_config.get("webhook_env", ""))):
         import requests
         requests.post(wh, data={"content": "**🎙️ Github Actions: Daily Briefing Matrix Offline Output**\nSources:\n" + "\n".join(s["link"][:80]+"..." for s in all_selected[:5])}, files={"file": (fn, open(fn, "rb"))})
 
