@@ -75,11 +75,9 @@ def generate_background_music(url):
         return "temp_bg_music.mp3"
     except: return fallback
 
-# --- DELIVERY / GENERATION ---
 async def process_user(bot, user_name, user_config, scraped_articles, seen):
     channel_id = user_config.get("discord_channel_id")
     if not channel_id: return seen
-    
     ch = bot.get_channel(int(channel_id))
     if not ch: return seen
 
@@ -123,7 +121,6 @@ async def process_user(bot, user_name, user_config, scraped_articles, seen):
         subprocess.run(["ffmpeg", "-y", "-i", "v.mp3", "-stream_loop", "-1", "-i", bg, "-filter_complex", "[0:a]aresample=44100[v];[1:a]aresample=44100,volume=0.06[bg];[v][bg]amix=inputs=2:duration=first[out]", "-map", "[out]", "-ar", "44100", "-b:a", "128k", fn], check=True)
     else: subprocess.run(["ffmpeg", "-y", "-i", "v.mp3", "-ar", "44100", "-b:a", "128k", fn], check=True)
 
-    sources = "\n".join(s["link"] for s in all_selected)
     await ch.send(content="**🎙️ Your Daily Briefing is Here.**\nSources:\n" + "\n".join(s["link"][:80]+"..." for s in all_selected[:5]), file=discord.File(fn))
 
     for f in ["v.mp3", fn, bg]:
@@ -132,15 +129,14 @@ async def process_user(bot, user_name, user_config, scraped_articles, seen):
 
 async def generate_global_briefings(bot):
     try:
-        with open("users.json", "r") as f: USERS = json.load(f)
+        with open("users.json") as f: USERS = json.load(f)
     except: return
     seen = set(line.strip() for line in open(SEEN_FILE, "r")) if os.path.exists(SEEN_FILE) else set()
     global_url_params = {}
     for user, info in USERS.items():
         for cat, feeds in info.get("feeds", {}).items():
             for fd in feeds:
-                if fd["url"] not in global_url_params: global_url_params[fd["url"]] = []
-                global_url_params[fd["url"]].append({"category": cat, "weight": fd["weight"], "url": fd["url"]})
+                global_url_params.setdefault(fd["url"], []).append({"category": cat, "weight": fd["weight"], "url": fd["url"]})
 
     q = asyncio.Queue()
     raw_entries = []
@@ -149,6 +145,7 @@ async def generate_global_briefings(bot):
     await q.join(); [c.cancel() for c in consumers]
     for user, config in USERS.items(): seen = await process_user(bot, user, config, raw_entries, seen)
     with open(SEEN_FILE, "w") as f: f.write("\n".join(list(seen)[-300:]))
+
 
 # --- DISCORD UI APP ---
 intents = discord.Intents.default()
@@ -164,31 +161,61 @@ class AddTopicModal(ui.Modal, title='Add a New News Topic'):
         with open("users.json") as f: data = json.load(f)
         if uid in data:
             data[uid]["feeds"].setdefault("dynamic", []).append({"url": u, "weight": 15})
-            data[uid]["multipliers"][topic.lower()[:15]] = 2.0
+            topic_key = topic.lower()[:15]
+            data[uid]["multipliers"][topic_key] = 2.0
+            data[uid].setdefault("tune_counts", {})[topic_key] = 0
             with open("users.json", "w") as f: json.dump(data, f, indent=4)
             with open("miss_analytics.txt", "a") as f: f.write(f"[{datetime.datetime.now()}] RSS DB Fallback Sync: {topic}\n")
             await interaction.followup.send(f"✅ Added `{topic}` to your daily podcast! We will aggressively pull news about this from now on.", ephemeral=True)
 
-class TuningView(ui.View):
-    def __init__(self, cat: str):
-        super().__init__(); self.cat = cat
-    async def adjust(self, i: discord.Interaction, adj: float):
-        uid = str(i.user.id)
-        with open("users.json") as f: data = json.load(f)
-        c = data.get(uid, {}).get("multipliers", {}).get(self.cat, 1.0)
-        data[uid]["multipliers"][self.cat] = round(max(0.0, c + adj), 3)
-        with open("users.json", "w") as f: json.dump(data, f, indent=4)
-        await i.response.send_message(f"✅ Adjusted `{self.cat}` successfully!", ephemeral=True)
-    @ui.button(label='[ -- ]', style=discord.ButtonStyle.danger)
-    async def d2(self, i, b): await self.adjust(i, -1.0)
-    @ui.button(label='[ - ]', style=discord.ButtonStyle.secondary)
-    async def d1(self, i, b): await self.adjust(i, -0.5)
-    @ui.button(label='[ + ]', style=discord.ButtonStyle.secondary)
-    async def u1(self, i, b): await self.adjust(i, 0.5)
-    @ui.button(label='[ ++ ]', style=discord.ButtonStyle.primary)
-    async def u2(self, i, b): await self.adjust(i, 1.0)
-    @ui.button(label='Add New Topic', style=discord.ButtonStyle.success, row=1)
-    async def newt(self, i, b): await i.response.send_modal(AddTopicModal())
+class TuningDropdown(ui.Select):
+    def __init__(self, topics: list):
+        options = [discord.SelectOption(label=t.title()) for t in topics] if topics else [discord.SelectOption(label="No topics found")]
+        super().__init__(placeholder="Select a topic to tune...", min_values=1, max_values=1, options=options)
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(embed=discord.Embed(title=f"Adjusting: {self.values[0]}", description="Use the buttons below to smoothly change the impact curve.", color=discord.Color(0xF5DEB3)), view=MasterTuningView(interaction.user.id, self.values[0]))
+
+class MasterTuningView(ui.View):
+    def __init__(self, uid_str, selected_topic=None):
+        super().__init__(timeout=180.0)
+        self.uid_str = str(uid_str)
+        self.topic = selected_topic.lower() if selected_topic else None
+        
+        with open("users.json") as f: self.data = json.load(f)
+        active_topics = list(self.data.get(self.uid_str, {}).get("multipliers", {}).keys())
+        self.add_item(TuningDropdown(active_topics))
+        
+        if self.topic:
+            btn_configs = [("--", -1.0, discord.ButtonStyle.danger), ("-", -0.5, discord.ButtonStyle.secondary), ("+", 0.5, discord.ButtonStyle.secondary), ("++", 1.0, discord.ButtonStyle.primary)]
+            for label, adj, style in btn_configs:
+                btn = ui.Button(label=label, style=style, custom_id=f"btn_{label}")
+                btn.callback = self.make_callback(adj)
+                self.add_item(btn)
+        
+        add_btn = ui.Button(label="Add Topic", style=discord.ButtonStyle.success, row=2)
+        add_btn.callback = self.add_topic_callback
+        self.add_item(add_btn)
+
+    def make_callback(self, delta):
+        async def btn_callback(interaction: discord.Interaction):
+            with open("users.json") as f: d = json.load(f)
+            counts = d[self.uid_str].setdefault("tune_counts", {})
+            current_count = counts.get(self.topic, 0)
+            
+            # Decay Logic
+            momentum = max(0.05, 1.0 / (current_count + 1))
+            true_adjustment = delta * momentum
+            
+            cur_weight = d[self.uid_str]["multipliers"].get(self.topic, 1.0)
+            d[self.uid_str]["multipliers"][self.topic] = round(max(0.0, cur_weight + true_adjustment), 3)
+            counts[self.topic] = current_count + 1
+            
+            with open("users.json", "w") as f: json.dump(d, f, indent=4)
+            await interaction.response.send_message(f"✅ Adjusted `{self.topic.title()}` seamlessly!", ephemeral=True)
+        return btn_callback
+
+    async def add_topic_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AddTopicModal())
 
 class SpotifyModal(ui.Modal, title='Add Spotify Background Music'):
     url_input = ui.TextInput(label='Paste your Spotify Playlist Link here', style=discord.TextStyle.short)
@@ -212,14 +239,15 @@ async def onboard(ctx):
     
     users[uid] = {
         "discord_channel_id": str(ch.id), "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXc8kgYqQLKWv",
-        "feeds": {"world": [{"url": "https://apnews.com/hub/politics.rss", "weight": 15}]}, "multipliers": {"gaming": 1.5}
+        "feeds": {"world": [{"url": "https://apnews.com/hub/politics.rss", "weight": 15}]}, "multipliers": {"politics": 1.5}, "tune_counts": {}
     }
     with open("users.json", "w") as f: json.dump(users, f, indent=4)
     await ctx.send(f"🎉 Welcome to Orator! I created your private news channel right here: <#{ch.id}>. Your daily podcast will drop there every morning!")
 
 @bot.command()
-async def tune(ctx, category: str):
-    await ctx.send(f"**Tuning your preferences for:** `{category}`", view=TuningView(category))
+async def tune(ctx):
+    embed = discord.Embed(title="Tune Your Podcast Algorithm", description="Select a topic to fine-tune its relevance.", color=discord.Color(0xF5DEB3))
+    await ctx.send(embed=embed, view=MasterTuningView(ctx.author.id))
 
 @bot.command()
 async def music(ctx):
@@ -232,8 +260,13 @@ async def nerds(ctx):
     if uid not in data: return await ctx.send("Unregistered endpoint.")
     c = data[uid]
     text = "**[ ADVANCED PODCAST DIAGNOSTICS ]**\n"
-    text += "```json\n" + json.dumps({"feeds": c.get("feeds"), "multipliers": c.get("multipliers")}, indent=2) + "\n```"
+    text += "```json\n" + json.dumps({"feeds": c.get("feeds"), "multipliers": c.get("multipliers"), "tune_counts": c.get("tune_counts")}, indent=2) + "\n```"
     await ctx.send(text)
+
+@bot.command()
+async def force_briefing(ctx):
+    await ctx.send("Generating explicit briefing parameters...")
+    await generate_global_briefings(bot)
 
 @tasks.loop(time=datetime.time(hour=13, minute=0, tzinfo=datetime.timezone.utc))
 async def daily_brief_timer(): await generate_global_briefings(bot)
