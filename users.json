@@ -1,6 +1,6 @@
 {
     "harsha": {
-        "webhook_env": "TESTING_WEBHOOK_URL",
+        "webhook_env": "DISCORD_WEBHOOK_URL",
         "discord_channel_id": null,
         "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXc8kgYqQLKWv",
         "feeds": {
