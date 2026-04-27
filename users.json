@@ -1,7 +1,7 @@
 {
-    "harsha": {
-        "webhook_env": "DISCORD_WEBHOOK_URL",
-        "discord_user_id_env": "DISCORD_USER_ID",
+    "harsha_testing_node": {
+        "webhook_url_raw": "PASTE_YOUR_COPIED_WEBHOOK_URL_HERE",
+        "discord_channel_id": null,
         "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXc8kgYqQLKWv",
         "feeds": {
             "politics & markets": [
@@ -42,24 +42,7 @@
             "nba": 2.2, "zelda": 1.2, "mario": 1.2, "clairo": 2.2, "daniel caesar": 2.2, 
             "drake": 2.0, "21 savage": 2.0, "frank ocean": 2.3, "economy": 1.9, "bitcoin": 1.5,
             "fed": 1.7, "inflation": 1.8, "texas": 1.5
-        }
-    },
-    "brother": {
-        "webhook_env": "BROTHER_WEBHOOK_URL",
-        "discord_user_id_env": "BROTHER_DISCORD_ID",
-        "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DX4WYpdVIPJKT",
-        "feeds": {
-            "sports": [
-                {"url": "https://www.espn.com/espn/rss/nfl/news", "weight": 20},
-                {"url": "https://bleacherreport.com/articles/feed?tag_id=14", "weight": 18}
-            ],
-            "media": [
-                {"url": "https://www.crunchyroll.com/news/rss", "weight": 20},
-                {"url": "https://www.theverge.com/rss/index.xml", "weight": 15}
-            ]
         },
-        "multipliers": {
-            "gaming": 2.0, "nfl": 2.5, "anime": 2.0, "marvel": 1.5
-        }
+        "tune_counts": {}
     }
 }

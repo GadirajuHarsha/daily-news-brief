@@ -1,7 +1,9 @@
 name: Offline Orator Testing Action
 
 on:
-  workflow_dispatch: # Allows manual trigger from the GitHub UI Actions tab
+  workflow_dispatch: # Allows manual trigger testing
+  schedule:
+    - cron: '0 13 * * *' # Bypasses to run exactly at 8:00 AM EST every day
 
 jobs:
   run-orator:
