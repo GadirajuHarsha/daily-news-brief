@@ -121,7 +121,11 @@ async def process_user(bot, user_name, user_config, scraped_articles, seen):
         subprocess.run(["ffmpeg", "-y", "-i", "v.mp3", "-stream_loop", "-1", "-i", bg, "-filter_complex", "[0:a]aresample=44100[v];[1:a]aresample=44100,volume=0.06[bg];[v][bg]amix=inputs=2:duration=first[out]", "-map", "[out]", "-ar", "44100", "-b:a", "128k", fn], check=True)
     else: subprocess.run(["ffmpeg", "-y", "-i", "v.mp3", "-ar", "44100", "-b:a", "128k", fn], check=True)
 
-    await ch.send(content="**🎙️ Your Daily Briefing is Here.**\nSources:\n" + "\n".join(s["link"][:80]+"..." for s in all_selected[:5]), file=discord.File(fn))
+    if bot and ch:
+        await ch.send(content="**🎙️ Your Daily Briefing is Here.**\nSources:\n" + "\n".join(s["link"][:80]+"..." for s in all_selected[:5]), file=discord.File(fn))
+    elif (wh := user_config.get("webhook_url_raw")):
+        import requests
+        requests.post(wh, data={"content": "**🎙️ Github Actions: Daily Briefing Matrix Offline Output**\nSources:\n" + "\n".join(s["link"][:80]+"..." for s in all_selected[:5])}, files={"file": (fn, open(fn, "rb"))})
 
     for f in ["v.mp3", fn, bg]:
         if f and os.path.exists(f): os.remove(f)
@@ -277,6 +281,11 @@ async def on_ready():
     if not daily_brief_timer.is_running(): daily_brief_timer.start()
 
 if __name__ == "__main__":
-    b_tok = os.getenv("DISCORD_BOT_TOKEN")
-    if b_tok: bot.run(b_tok)
-    else: print("CRITICAL ERROR: Discord Token Offline in .env")
+    import sys
+    if "--action" in sys.argv:
+        print("Executing GitHub Actions fallback mode...")
+        asyncio.run(generate_global_briefings(None))
+    else:
+        b_tok = os.getenv("DISCORD_BOT_TOKEN")
+        if b_tok: bot.run(b_tok)
+        else: print("CRITICAL ERROR: Discord Token Offline in .env")
