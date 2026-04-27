@@ -155,8 +155,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-class AddTopicModal(ui.Modal, title='Integrate New RSS Pipeline'):
-    topic_query = ui.TextInput(label='Topic Description & Scope', style=discord.TextStyle.paragraph)
+class AddTopicModal(ui.Modal, title='Add a New News Topic'):
+    topic_query = ui.TextInput(label='What topic do you want to add?', style=discord.TextStyle.paragraph)
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
         topic = self.topic_query.value; uid = str(interaction.user.id)
@@ -167,7 +167,7 @@ class AddTopicModal(ui.Modal, title='Integrate New RSS Pipeline'):
             data[uid]["multipliers"][topic.lower()[:15]] = 2.0
             with open("users.json", "w") as f: json.dump(data, f, indent=4)
             with open("miss_analytics.txt", "a") as f: f.write(f"[{datetime.datetime.now()}] RSS DB Fallback Sync: {topic}\n")
-            await interaction.followup.send(f"✅ Integrated custom matrix for `{topic}`. Generated Google News aggregator endpoint successfully.", ephemeral=True)
+            await interaction.followup.send(f"✅ Added `{topic}` to your daily podcast! We will aggressively pull news about this from now on.", ephemeral=True)
 
 class TuningView(ui.View):
     def __init__(self, cat: str):
@@ -178,7 +178,7 @@ class TuningView(ui.View):
         c = data.get(uid, {}).get("multipliers", {}).get(self.cat, 1.0)
         data[uid]["multipliers"][self.cat] = round(max(0.0, c + adj), 3)
         with open("users.json", "w") as f: json.dump(data, f, indent=4)
-        await i.response.send_message(f"Tuned `{self.cat}` dynamically adjusted by `{adj}`.", ephemeral=True)
+        await i.response.send_message(f"✅ Adjusted `{self.cat}` successfully!", ephemeral=True)
     @ui.button(label='[ -- ]', style=discord.ButtonStyle.danger)
     async def d2(self, i, b): await self.adjust(i, -1.0)
     @ui.button(label='[ - ]', style=discord.ButtonStyle.secondary)
@@ -187,17 +187,17 @@ class TuningView(ui.View):
     async def u1(self, i, b): await self.adjust(i, 0.5)
     @ui.button(label='[ ++ ]', style=discord.ButtonStyle.primary)
     async def u2(self, i, b): await self.adjust(i, 1.0)
-    @ui.button(label='Neural Request', style=discord.ButtonStyle.success, row=1)
+    @ui.button(label='Add New Topic', style=discord.ButtonStyle.success, row=1)
     async def newt(self, i, b): await i.response.send_modal(AddTopicModal())
 
-class SpotifyModal(ui.Modal, title='Spotify Configuration String'):
-    url_input = ui.TextInput(label='Public Playlist URI', style=discord.TextStyle.short)
+class SpotifyModal(ui.Modal, title='Add Spotify Background Music'):
+    url_input = ui.TextInput(label='Paste your Spotify Playlist Link here', style=discord.TextStyle.short)
     async def on_submit(self, interaction: discord.Interaction):
         uid = str(interaction.user.id)
         with open("users.json") as f: data = json.load(f)
         data[uid]["spotify_playlist_url"] = self.url_input.value
         with open("users.json", "w") as f: json.dump(data, f, indent=4)
-        await interaction.response.send_message("✅ Spotify background metrics synchronized.", ephemeral=True)
+        await interaction.response.send_message("✅ Spotify background music synchronized.", ephemeral=True)
 
 @bot.command()
 async def onboard(ctx):
@@ -205,7 +205,7 @@ async def onboard(ctx):
     try:
         with open("users.json") as f: users = json.load(f)
     except: users = {}
-    if uid in users: return await ctx.send("Your node already exists in the matrix. Use `!tune` to adapt.")
+    if uid in users: return await ctx.send("You already have a podcast set up! Use `!tune` to adjust your topics.")
     
     overwrites = {ctx.guild.default_role: discord.PermissionOverwrite(read_messages=False), ctx.author: discord.PermissionOverwrite(read_messages=True)}
     ch = await ctx.guild.create_text_channel(name=f"{ctx.author.name.lower()}-news-pod", overwrites=overwrites)
@@ -215,15 +215,15 @@ async def onboard(ctx):
         "feeds": {"world": [{"url": "https://apnews.com/hub/politics.rss", "weight": 15}]}, "multipliers": {"gaming": 1.5}
     }
     with open("users.json", "w") as f: json.dump(users, f, indent=4)
-    await ctx.send(f"🎉 Fully initialized Autonomous Server node locking <#{ch.id}>. You govern your own backend.")
+    await ctx.send(f"🎉 Welcome to Orator! I created your private news channel right here: <#{ch.id}>. Your daily podcast will drop there every morning!")
 
 @bot.command()
 async def tune(ctx, category: str):
-    await ctx.send(f"**Calibrating the Neural Threshold for:** `{category}`", view=TuningView(category))
+    await ctx.send(f"**Tuning your preferences for:** `{category}`", view=TuningView(category))
 
 @bot.command()
 async def music(ctx):
-    await ctx.send("Configure the background routing table:", view=type("MV", (ui.View,), {"b": ui.button(label="Link Spotify", style=discord.ButtonStyle.blurple)(lambda s,i,b: i.response.send_modal(SpotifyModal()))})())
+    await ctx.send("Add your Custom Spotify Playlist:", view=type("MV", (ui.View,), {"b": ui.button(label="Link Spotify", style=discord.ButtonStyle.blurple)(lambda s,i,b: i.response.send_modal(SpotifyModal()))})())
 
 @bot.command()
 async def nerds(ctx):
@@ -231,7 +231,7 @@ async def nerds(ctx):
     with open("users.json") as f: data = json.load(f)
     if uid not in data: return await ctx.send("Unregistered endpoint.")
     c = data[uid]
-    text = "**[ NEURAL NET DIAGNOSTICS ]**\n"
+    text = "**[ ADVANCED PODCAST DIAGNOSTICS ]**\n"
     text += "```json\n" + json.dumps({"feeds": c.get("feeds"), "multipliers": c.get("multipliers")}, indent=2) + "\n```"
     await ctx.send(text)
 
