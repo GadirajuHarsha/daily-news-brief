@@ -1,0 +1,18 @@
+{
+    "world": [
+        {"url": "https://www.pbs.org/newshour/feeds/rss/politics", "name": "PBS Politics"},
+        {"url": "https://apnews.com/hub/politics.rss", "name": "AP News"}
+    ],
+    "sports": [
+        {"url": "https://www.espn.com/espn/rss/nba/news", "name": "ESPN NBA"},
+        {"url": "https://www.espn.com/espn/rss/nfl/news", "name": "ESPN NFL"}
+    ],
+    "tech": [
+        {"url": "https://www.engadget.com/rss.xml", "name": "Engadget"},
+        {"url": "https://arstechnica.com/feed/", "name": "Ars Technica"}
+    ],
+    "culture": [
+        {"url": "https://pitchfork.com/rss/news/", "name": "Pitchfork"},
+        {"url": "https://hypebeast.com/music/feed", "name": "Hypebeast Music"}
+    ]
+}
