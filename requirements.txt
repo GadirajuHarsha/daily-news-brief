@@ -9,7 +9,5 @@ beautifulsoup4
 python-dotenv
 edge-tts
 chromadb
-yt-dlp
-spotipy
 requests
 discord.py

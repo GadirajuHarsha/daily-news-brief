@@ -1,0 +1,39 @@
+========================================================
+ORATOR BOT: HANDOFF & RESUME INSTRUCTIONS
+========================================================
+
+Hello! If you are picking this project up on a fresh machine (or if you are an AI Agent reading this), here is exactly where the project stands and what needs to be done next.
+
+## CURRENT STATE OF THE PROJECT
+1. **Server Migration Prepared**: The code has been fully refactored to be deployed on a home server. We removed reliance on GitHub Actions schedules and built a Docker ecosystem (`docker-compose.yml` and `SERVER_README.md`).
+2. **Spotify Purged**: We completely removed the Spotify integration (`spotipy`, `yt-dlp`) due to API restrictions. The bot now relies exclusively on local `.mp3` files placed in the `music/` directory.
+3. **Database Centralized**: We extracted the curated RSS feeds into `default_sources.json`. The bot uses this for new user onboarding and as a priority lookup when adding new topics (before falling back to Google News).
+4. **Data Reset**: `users.json` has been wiped clean (`{}`) so you can test the new onboarding experience from scratch.
+
+## WHAT TO DO IMMEDIATELY UPON CLONING
+1. **API Keys (.env)**:
+   - Create a file named `.env` in the root directory (it is ignored by Git, so it won't clone).
+   - Add the following keys:
+     ```
+     OPENAI_API_KEY=your_openai_service_account_key
+     DISCORD_BOT_TOKEN=your_discord_bot_token
+     ```
+2. **Music Directory**:
+   - Create a folder named `music/` in the root directory.
+   - Drop at least one `.mp3` file into it. The bot will randomly select from this folder to mix background music into the podcast.
+3. **Test the Bot Locally**:
+   - Run `pip install -r requirements.txt`.
+   - Run `python main.py`.
+   - Go to Discord and type `!onboard` to verify it grants you the curated feeds from `default_sources.json`.
+   - Type `!tune` to verify the UI.
+
+## DEPLOYMENT TO FRIEND'S SERVER
+When you are ready, zip up the following files/folders and send them to your friend:
+- `docker-compose.yml`
+- `SERVER_README.md`
+- `.env`
+- `default_sources.json`
+- `music/` (containing the mp3 files)
+- `data/` (optional, Docker will make it)
+
+They just need to follow the `SERVER_README.md` to launch it. Watchtower will handle all future updates automatically whenever you push code to `main`.

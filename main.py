@@ -2,9 +2,6 @@ import os, asyncio, feedparser, datetime, hashlib, trafilatura, subprocess, rand
 import numpy as np
 import edge_tts
 import chromadb
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
-import yt_dlp
 from openai import AsyncOpenAI
 import discord
 from discord.ext import commands, tasks
@@ -16,10 +13,13 @@ load_dotenv()
 MIN_STORY_FLOOR = 5 
 MAX_PER_SECTION = 8
 WORD_BUDGET = 2200
-SEEN_FILE = "seen_stories.txt"
+SEEN_FILE = "data/seen_stories.txt"
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-collection = chromadb.PersistentClient(path="./chroma_db").get_or_create_collection(name="orator_news_rag")
+
+# Ensure data directory exists
+os.makedirs("data", exist_ok=True)
+collection = chromadb.PersistentClient(path="data/chroma_db").get_or_create_collection(name="orator_news_rag")
 
 def robust_extract(url):
     try:
@@ -62,18 +62,9 @@ async def consumer_worker(q, raw_entries_list):
         except asyncio.CancelledError: break
         except: q.task_done()
 
-def generate_background_music(url):
-    cid, secret = os.getenv("SPOTIPY_CLIENT_ID"), os.getenv("SPOTIPY_CLIENT_SECRET")
+def generate_background_music():
     fallback = random.choice(glob.glob("music/*.mp3")) if glob.glob("music/*.mp3") else None
-    if not url or not cid or not secret: return fallback
-    try:
-        sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=cid, client_secret=secret))
-        if not (tracks := sp.playlist_tracks(url)['items']): return fallback
-        tr = random.choice(tracks)['track']
-        query = f"{tr['name']} {tr['artists'][0]['name']} audio"
-        with yt_dlp.YoutubeDL({'format': 'bestaudio/best', 'outtmpl': 'temp_bg_music', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}], 'quiet': True}) as ydl: ydl.download([f"ytsearch1:{query}"])
-        return "temp_bg_music.mp3"
-    except: return fallback
+    return fallback
 
 async def process_user(bot, user_name, user_config, scraped_articles, seen):
     channel_id = user_config.get("discord_channel_id")
@@ -81,7 +72,6 @@ async def process_user(bot, user_name, user_config, scraped_articles, seen):
     ch = bot.get_channel(int(channel_id))
     if not ch: return seen
 
-    playlist_url = user_config.get("spotify_playlist_url", "")
     feeds_conf = user_config.get("feeds", {})
     mult_conf = user_config.get("multipliers", {})
 
@@ -117,7 +107,7 @@ async def process_user(bot, user_name, user_config, scraped_articles, seen):
     fn = f"{datetime.datetime.now().strftime('%B_%d')}_{user_name}.mp3"
     await edge_tts.Communicate(full_script, 'en-US-BrianNeural').save("v.mp3")
     
-    if (bg := generate_background_music(playlist_url)) and os.path.exists(bg):
+    if (bg := generate_background_music()) and os.path.exists(bg):
         subprocess.run(["ffmpeg", "-y", "-i", "v.mp3", "-stream_loop", "-1", "-i", bg, "-filter_complex", "[0:a]aresample=44100[v];[1:a]aresample=44100,volume=0.06[bg];[v][bg]amix=inputs=2:duration=first[out]", "-map", "[out]", "-ar", "44100", "-b:a", "128k", fn], check=True)
     else: subprocess.run(["ffmpeg", "-y", "-i", "v.mp3", "-ar", "44100", "-b:a", "128k", fn], check=True)
 
@@ -133,7 +123,7 @@ async def process_user(bot, user_name, user_config, scraped_articles, seen):
 
 async def generate_global_briefings(bot):
     try:
-        with open("users.json") as f: USERS = json.load(f)
+        with open("data/users.json") as f: USERS = json.load(f)
     except: return
     seen = set(line.strip() for line in open(SEEN_FILE, "r")) if os.path.exists(SEEN_FILE) else set()
     global_url_params = {}
@@ -161,16 +151,39 @@ class AddTopicModal(ui.Modal, title='Add a New News Topic'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
         topic = self.topic_query.value; uid = str(interaction.user.id)
-        u = f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}"
-        with open("users.json") as f: data = json.load(f)
-        if uid in data:
+        
+        with open("data/users.json") as f: data = json.load(f)
+        if uid not in data: return
+
+        # Load master list of curated sources
+        try:
+            with open("default_sources.json") as f: default_sources = json.load(f)
+        except: default_sources = {}
+
+        topic_lower = topic.lower().strip()
+        matched_feeds = []
+
+        # Attempt to find the topic in default_sources
+        for cat, feeds in default_sources.items():
+            if topic_lower in cat.lower():
+                matched_feeds = feeds
+                break
+
+        if matched_feeds:
+            data[uid]["feeds"].setdefault(topic_lower, []).extend(matched_feeds)
+            data[uid]["multipliers"][topic_lower] = 1.5
+            data[uid].setdefault("tune_counts", {})[topic_lower] = 0
+            with open("data/users.json", "w") as f: json.dump(data, f, indent=4)
+            await interaction.followup.send(f"✅ Found matching curated feeds for `{topic}`! Added to your daily podcast.", ephemeral=True)
+        else:
+            u = f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}"
             data[uid]["feeds"].setdefault("dynamic", []).append({"url": u, "weight": 15})
-            topic_key = topic.lower()[:15]
+            topic_key = topic_lower[:15]
             data[uid]["multipliers"][topic_key] = 2.0
             data[uid].setdefault("tune_counts", {})[topic_key] = 0
-            with open("users.json", "w") as f: json.dump(data, f, indent=4)
-            with open("miss_analytics.txt", "a") as f: f.write(f"[{datetime.datetime.now()}] RSS DB Fallback Sync: {topic}\n")
-            await interaction.followup.send(f"✅ Added `{topic}` to your daily podcast! We will aggressively pull news about this from now on.", ephemeral=True)
+            with open("data/users.json", "w") as f: json.dump(data, f, indent=4)
+            with open("data/miss_analytics.txt", "a") as f: f.write(f"[{datetime.datetime.now()}] RSS DB Fallback Sync: {topic}\n")
+            await interaction.followup.send(f"✅ Added `{topic}` to your daily podcast via Google News fallback! We will aggressively pull news about this from now on.", ephemeral=True)
 
 class TuningDropdown(ui.Select):
     def __init__(self, topics: list):
@@ -185,8 +198,12 @@ class MasterTuningView(ui.View):
         self.uid_str = str(uid_str)
         self.topic = selected_topic.lower() if selected_topic else None
         
-        with open("users.json") as f: self.data = json.load(f)
-        active_topics = list(self.data.get(self.uid_str, {}).get("multipliers", {}).keys())
+        try:
+            with open("data/users.json") as f: self.data = json.load(f)
+            active_topics = list(self.data.get(self.uid_str, {}).get("multipliers", {}).keys())
+        except:
+            active_topics = []
+
         self.add_item(TuningDropdown(active_topics))
         
         if self.topic:
@@ -202,7 +219,7 @@ class MasterTuningView(ui.View):
 
     def make_callback(self, delta):
         async def btn_callback(interaction: discord.Interaction):
-            with open("users.json") as f: d = json.load(f)
+            with open("data/users.json") as f: d = json.load(f)
             counts = d[self.uid_str].setdefault("tune_counts", {})
             current_count = counts.get(self.topic, 0)
             
@@ -214,38 +231,36 @@ class MasterTuningView(ui.View):
             d[self.uid_str]["multipliers"][self.topic] = round(max(0.0, cur_weight + true_adjustment), 3)
             counts[self.topic] = current_count + 1
             
-            with open("users.json", "w") as f: json.dump(d, f, indent=4)
+            with open("data/users.json", "w") as f: json.dump(d, f, indent=4)
             await interaction.response.send_message(f"✅ Adjusted `{self.topic.title()}` seamlessly!", ephemeral=True)
         return btn_callback
 
     async def add_topic_callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(AddTopicModal())
 
-class SpotifyModal(ui.Modal, title='Add Spotify Background Music'):
-    url_input = ui.TextInput(label='Paste your Spotify Playlist Link here', style=discord.TextStyle.short)
-    async def on_submit(self, interaction: discord.Interaction):
-        uid = str(interaction.user.id)
-        with open("users.json") as f: data = json.load(f)
-        data[uid]["spotify_playlist_url"] = self.url_input.value
-        with open("users.json", "w") as f: json.dump(data, f, indent=4)
-        await interaction.response.send_message("✅ Spotify background music synchronized.", ephemeral=True)
-
 @bot.command()
 async def onboard(ctx):
     uid = str(ctx.author.id)
     try:
-        with open("users.json") as f: users = json.load(f)
+        with open("data/users.json") as f: users = json.load(f)
     except: users = {}
     if uid in users: return await ctx.send("You already have a podcast set up! Use `!tune` to adjust your topics.")
     
     overwrites = {ctx.guild.default_role: discord.PermissionOverwrite(read_messages=False), ctx.author: discord.PermissionOverwrite(read_messages=True)}
     ch = await ctx.guild.create_text_channel(name=f"{ctx.author.name.lower()}-news-pod", overwrites=overwrites)
     
+    try:
+        with open("default_sources.json") as f: default_sources = json.load(f)
+    except:
+        default_sources = {"world": [{"url": "https://apnews.com/hub/politics.rss", "weight": 15}]}
+        
     users[uid] = {
-        "discord_channel_id": str(ch.id), "spotify_playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXc8kgYqQLKWv",
-        "feeds": {"world": [{"url": "https://apnews.com/hub/politics.rss", "weight": 15}]}, "multipliers": {"politics": 1.5}, "tune_counts": {}
+        "discord_channel_id": str(ch.id),
+        "feeds": default_sources, 
+        "multipliers": {cat: 1.0 for cat in default_sources.keys()}, 
+        "tune_counts": {}
     }
-    with open("users.json", "w") as f: json.dump(users, f, indent=4)
+    with open("data/users.json", "w") as f: json.dump(users, f, indent=4)
     await ctx.send(f"🎉 Welcome to Orator! I created your private news channel right here: <#{ch.id}>. Your daily podcast will drop there every morning!")
 
 @bot.command()
@@ -254,13 +269,9 @@ async def tune(ctx):
     await ctx.send(embed=embed, view=MasterTuningView(ctx.author.id))
 
 @bot.command()
-async def music(ctx):
-    await ctx.send("Add your Custom Spotify Playlist:", view=type("MV", (ui.View,), {"b": ui.button(label="Link Spotify", style=discord.ButtonStyle.blurple)(lambda s,i,b: i.response.send_modal(SpotifyModal()))})())
-
-@bot.command()
 async def nerds(ctx):
     uid = str(ctx.author.id)
-    with open("users.json") as f: data = json.load(f)
+    with open("data/users.json") as f: data = json.load(f)
     if uid not in data: return await ctx.send("Unregistered endpoint.")
     c = data[uid]
     text = "**[ ADVANCED PODCAST DIAGNOSTICS ]**\n"
