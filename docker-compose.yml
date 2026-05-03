@@ -1,25 +1,25 @@
 version: '3.8'
 
 services:
-  orator:
+  orator-bot:
     image: ghcr.io/gadirajuharsha/daily-news-brief:latest
-    container_name: orator_v5_bot
-    restart: always # Keep it alive 24/7 and resilient to crashes
+    container_name: orator_bot
+    restart: always
     env_file:
       - .env
     volumes:
-      # Memory persistence: bind local files inside container
-      - ./users.json:/app/users.json
-      - ./chroma_db:/app/chroma_db
-      - ./seen_stories.txt:/app/seen_stories.txt
-    timezone: America/New_York # Set your friend's local timezone here
+      # Mount the data directory so user configs and database persist across updates
+      - ./data:/app/data
+      # Mount the local music folder
+      - ./music:/app/music
+      # Mount the default_sources file read-only
+      - ./default_sources.json:/app/default_sources.json:ro
 
   watchtower:
     image: containrrr/watchtower
     container_name: watchtower
+    restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Un-comment the line below if the repo is strictly private and friend needs auth:
-      # - ~/.docker/config.json:/config.json 
-    command: --interval 60 orator_v5_bot # Check Github every 60 seconds for 0-SSH syncing
-    restart: always
+    # Check for new image every 5 minutes (300 seconds), only update orator_bot
+    command: --interval 300 orator_bot
